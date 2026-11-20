@@ -12,6 +12,9 @@ from .models import Application, Job
 from .forms import JobForm, SlotForm
 from .models import Application, Job, Slot
 
+from .models import Application, Booking, Job, Slot
+from django.utils import timezone
+
 
 def _employer_or_403(request):
     if request.user.role != "employer":
@@ -223,3 +226,58 @@ def slot_delete(request, pk):
         slot.delete()
         return redirect("jobs:slot_list")
     return render(request, "jobs/slot_delete.html", {"slot": slot})
+
+
+@login_required
+def bookable_slots(request, application_pk):
+    if request.user.role != "candidate":
+        return HttpResponseForbidden("Only candidates book slots.")
+    app = get_object_or_404(Application, pk=application_pk)
+    if app.candidate_id != request.user.id:
+        return HttpResponseForbidden("Not your application.")
+
+    slots = Slot.objects.filter(
+        employer=app.job.employer,
+        start_time__gt=timezone.now(),
+    ).exclude(booking__isnull=False)
+
+    return render(
+        request,
+        "jobs/bookable_slots.html",
+        {"app": app, "slots": slots, "already_booked": Booking.objects.filter(application=app).exists()},
+    )
+
+
+@login_required
+def book_slot(request, slot_pk):
+    if request.user.role != "candidate":
+        return HttpResponseForbidden("Only candidates book slots.")
+    if request.method != "POST":
+        return HttpResponseForbidden("POST only.")
+
+    slot = get_object_or_404(Slot, pk=slot_pk)
+    application_pk = request.POST.get("application_pk")
+    app = get_object_or_404(Application, pk=application_pk)
+
+    # Rule 1: candidate owns the application
+    if app.candidate_id != request.user.id:
+        return HttpResponseForbidden("Not your application.")
+    # Rule 2: slot belongs to the employer of the application's job
+    if slot.employer_id != app.job.employer_id:
+        return HttpResponseForbidden("Slot is not from this job's employer.")
+    # Rule 3: application status is interviewing
+    if app.status != Application.Status.INTERVIEWING:
+        return HttpResponse("Application is not in Interviewing status.", status=409)
+    # Rule 4: slot is in the future
+    if slot.start_time <= timezone.now():
+        return HttpResponse("Slot is not in the future.", status=409)
+    # Rule 5: application has no existing booking
+    if Booking.objects.filter(application=app).exists():
+        return HttpResponse("Application already has a booking.", status=409)
+
+    try:
+        with transaction.atomic():
+            Booking.objects.create(application=app, slot=slot)
+    except IntegrityError:
+        return HttpResponse("Slot already booked", status=409)
+    return redirect("jobs:my_applications")

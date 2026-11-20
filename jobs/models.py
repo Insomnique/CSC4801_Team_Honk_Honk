@@ -25,7 +25,6 @@ class Job(models.Model):
     def has_dependents(self):
         if self.applications.exists():
             return True
-        # slots check added when Slot model exists (FP-SCHED-1)
         return False
     
 class Application(models.Model):
@@ -87,5 +86,17 @@ class Slot(models.Model):
         return self.duration_minutes == 30
 
     def is_booked(self):
-        # Booking model arrives in FP-SCHED-2; until then nothing can be booked.
-        return False
+        return Booking.objects.filter(slot=self).exists()
+    
+
+class Booking(models.Model):
+    application = models.OneToOneField(
+        Application, on_delete=models.CASCADE, related_name="booking"
+    )
+    slot = models.OneToOneField(
+        Slot, on_delete=models.CASCADE, related_name="booking"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Booking app={self.application_id} slot={self.slot_id}"

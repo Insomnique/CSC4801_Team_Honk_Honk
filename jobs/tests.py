@@ -10,6 +10,8 @@ from .matching import (
 from datetime import timedelta
 from django.utils import timezone
 from .models import Slot
+from .models import Booking
+from django.db import IntegrityError
 
 class NormalizeSkillsTests(SimpleTestCase):
     def test_trims_lowercases_dedupes(self):
@@ -518,3 +520,119 @@ class SlotTests(TestCase):
         self.client.login(username="scand", password="pw")
         self.assertEqual(self.client.get(reverse("jobs:slot_list")).status_code, 403)
         self.assertEqual(self.client.get(reverse("jobs:slot_create")).status_code, 403)
+
+
+class BookingEligibilityTests(TestCase):
+    def setUp(self):
+        from accounts.models import CandidateProfile
+        self.emp = User.objects.create_user(username="bemp", email="be@e.com", password="pw", role="employer")
+        self.other_emp = User.objects.create_user(username="bemp2", email="be2@e.com", password="pw", role="employer")
+        self.cand = User.objects.create_user(username="bcand", email="bc@e.com", password="pw", role="candidate")
+        CandidateProfile.objects.create(user=self.cand, skills=["Python"])
+        self.other_cand = User.objects.create_user(username="bcand2", email="bc2@e.com", password="pw", role="candidate")
+        CandidateProfile.objects.create(user=self.other_cand, skills=["Python"])
+        self.job = Job.objects.create(employer=self.emp, title="J", description="d", required_skills=[])
+        self.other_job = Job.objects.create(employer=self.other_emp, title="OJ", description="d", required_skills=[])
+        self.app = Application.objects.create(candidate=self.cand, job=self.job, status="interviewing")
+        self.other_app = Application.objects.create(candidate=self.other_cand, job=self.job, status="interviewing")
+        self.slot = Slot.objects.create(
+            employer=self.emp,
+            start_time=timezone.now() + timedelta(hours=1),
+            end_time=timezone.now() + timedelta(hours=1, minutes=30),
+        )
+
+    def test_eligible_booking_created(self):
+        self.client.login(username="bcand", password="pw")
+        response = self.client.post(reverse("jobs:book_slot", args=[self.slot.pk]), {"application_pk": self.app.pk})
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(Booking.objects.filter(application=self.app, slot=self.slot).exists())
+
+    def test_booking_using_other_candidates_application_403(self):
+        self.client.login(username="bcand", password="pw")
+        response = self.client.post(reverse("jobs:book_slot", args=[self.slot.pk]), {"application_pk": self.other_app.pk})
+        self.assertEqual(response.status_code, 403)
+
+    def test_slot_from_other_employer_403(self):
+        other_slot = Slot.objects.create(
+            employer=self.other_emp,
+            start_time=timezone.now() + timedelta(hours=1),
+            end_time=timezone.now() + timedelta(hours=1, minutes=30),
+        )
+        self.client.login(username="bcand", password="pw")
+        response = self.client.post(reverse("jobs:book_slot", args=[other_slot.pk]), {"application_pk": self.app.pk})
+        self.assertEqual(response.status_code, 403)
+
+    def test_non_interviewing_application_409(self):
+        self.app.status = "pending"
+        self.app.save()
+        self.client.login(username="bcand", password="pw")
+        response = self.client.post(reverse("jobs:book_slot", args=[self.slot.pk]), {"application_pk": self.app.pk})
+        self.assertEqual(response.status_code, 409)
+
+    def test_past_slot_409(self):
+        past = Slot.objects.create(
+            employer=self.emp,
+            start_time=timezone.now() - timedelta(hours=1),
+            end_time=timezone.now() - timedelta(minutes=30),
+        )
+        self.client.login(username="bcand", password="pw")
+        response = self.client.post(reverse("jobs:book_slot", args=[past.pk]), {"application_pk": self.app.pk})
+        self.assertEqual(response.status_code, 409)
+
+    def test_already_booked_application_409(self):
+        other_slot = Slot.objects.create(
+            employer=self.emp,
+            start_time=timezone.now() + timedelta(hours=2),
+            end_time=timezone.now() + timedelta(hours=2, minutes=30),
+        )
+        Booking.objects.create(application=self.app, slot=self.slot)
+        self.client.login(username="bcand", password="pw")
+        response = self.client.post(reverse("jobs:book_slot", args=[other_slot.pk]), {"application_pk": self.app.pk})
+        self.assertEqual(response.status_code, 409)
+
+    def test_slot_already_booked_by_other_409(self):
+        Booking.objects.create(application=self.other_app, slot=self.slot)
+        self.client.login(username="bcand", password="pw")
+        response = self.client.post(reverse("jobs:book_slot", args=[self.slot.pk]), {"application_pk": self.app.pk})
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(response, "Slot already booked", status_code=409)
+        self.assertEqual(Booking.objects.filter(slot=self.slot).count(), 1)
+
+    def test_delete_booked_slot_409(self):
+        Booking.objects.create(application=self.app, slot=self.slot)
+        self.client.login(username="bemp", password="pw")
+        response = self.client.post(reverse("jobs:slot_delete", args=[self.slot.pk]))
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(Slot.objects.filter(pk=self.slot.pk).exists())
+
+    def test_booking_remains_after_status_change(self):
+        Booking.objects.create(application=self.app, slot=self.slot)
+        self.app.status = "accepted"
+        self.app.save()
+        self.assertEqual(Booking.objects.filter(application=self.app).count(), 1)
+        self.assertTrue(self.slot.is_booked())
+
+
+class AtomicityTests(TestCase):
+    """FP-SCHED-3: DB-level constraint, not application-level check."""
+
+    def setUp(self):
+        self.emp = User.objects.create_user(username="aemp3", email="ae3@e.com", password="pw", role="employer")
+        self.c1 = User.objects.create_user(username="ac1", email="ac1@e.com", password="pw", role="candidate")
+        self.c2 = User.objects.create_user(username="ac2", email="ac2@e.com", password="pw", role="candidate")
+        self.job = Job.objects.create(employer=self.emp, title="J", description="d", required_skills=[])
+        self.app1 = Application.objects.create(candidate=self.c1, job=self.job, status="interviewing")
+        self.app2 = Application.objects.create(candidate=self.c2, job=self.job, status="interviewing")
+        self.slot = Slot.objects.create(
+            employer=self.emp,
+            start_time=timezone.now() + timedelta(hours=1),
+            end_time=timezone.now() + timedelta(hours=1, minutes=30),
+        )
+
+    def test_concurrent_double_booking_one_wins(self):
+        Booking.objects.create(application=self.app1, slot=self.slot)
+        from django.db import transaction
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Booking.objects.create(application=self.app2, slot=self.slot)
+        self.assertEqual(Booking.objects.filter(slot=self.slot).count(), 1)

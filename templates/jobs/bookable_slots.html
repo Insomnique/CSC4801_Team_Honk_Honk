@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Book interview{% endblock %}
+{% block content %}
+<h1>Book interview for "{{ app.job.title }}"</h1>
+{% if already_booked %}
+    <p>You already have a booking for this application.</p>
+{% elif slots %}
+    <ul>
+    {% for slot in slots %}
+        <li>
+            {{ slot.start_time|date:"Y-m-d H:i" }} – {{ slot.end_time|date:"H:i" }}
+            <form method="post" action="{% url 'jobs:book_slot' slot.pk %}" style="display:inline">
+                {% csrf_token %}
+                <input type="hidden" name="application_pk" value="{{ app.pk }}">
+                <button type="submit">Book</button>
+            </form>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>No available slots for this job right now.</p>
+{% endif %}
+<p><a href="{% url 'jobs:my_applications' %}">Back to my applications</a></p>
+{% endblock %}

@@ -1,8 +1,11 @@
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponseForbidden, HttpResponse
+from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 
+from accounts.models import CandidateProfile
+
 from .forms import JobForm
+from .matching import candidate_job_sort_key, match_score
 from .models import Job
 
 
@@ -70,3 +73,24 @@ def job_delete(request, pk):
         job.save()
         return redirect("jobs:job_list")
     return render(request, "jobs/job_delete.html", {"job": job})
+
+
+@login_required
+def candidate_dashboard(request):
+    if request.user.role != "candidate":
+        return HttpResponseForbidden("Only candidates see the job dashboard.")
+    profile, _ = CandidateProfile.objects.get_or_create(user=request.user)
+    jobs = Job.objects.filter(is_deleted=False)
+    scored = [(match_score(profile.skills, job.required_skills), job) for job in jobs]
+    scored.sort(key=candidate_job_sort_key)
+    return render(request, "jobs/candidate_dashboard.html", {"scored": scored})
+
+
+@login_required
+def job_detail(request, pk):
+    job = get_object_or_404(Job, pk=pk, is_deleted=False)
+    score = None
+    if request.user.role == "candidate":
+        profile, _ = CandidateProfile.objects.get_or_create(user=request.user)
+        score = match_score(profile.skills, job.required_skills)
+    return render(request, "jobs/job_detail.html", {"job": job, "score": score})

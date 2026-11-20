@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Job recommendations{% endblock %}
+{% block content %}
+<h1>Recommended jobs</h1>
+{% if scored %}
+    <ul>
+    {% for score, job in scored %}
+        <li>
+            <strong><a href="{% url 'jobs:job_detail' job.pk %}">{{ job.title }}</a></strong>
+            — {{ job.employer.employer_profile.company_name|default:job.employer.username }}
+            — <strong>Match: {{ score }}%</strong><br>
+            Required skills:
+            {% if job.required_skills %}{{ job.required_skills|join:", " }}{% else %}(none){% endif %}
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>No jobs posted yet.</p>
+{% endif %}
+{% endblock %}

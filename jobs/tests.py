@@ -200,3 +200,71 @@ class JobCrudTests(TestCase):
         response = self.client.get(reverse("jobs:job_list"))
         self.assertEqual(response.status_code, 302)
         self.assertIn("/accounts/login/", response.url)
+
+class CandidateDashboardTests(TestCase):
+    def setUp(self):
+        self.cand = User.objects.create_user(
+            username="candx", email="cx@e.com", password="pw", role="candidate"
+        )
+        self.emp = User.objects.create_user(
+            username="empx", email="ex@e.com", password="pw", role="employer"
+        )
+        # Profile: Python, SQL
+        from accounts.models import CandidateProfile
+        CandidateProfile.objects.create(
+            user=self.cand, display_name="Cand X", skills=["Python", "SQL"]
+        )
+        self.job_full = Job.objects.create(
+            employer=self.emp, title="Full",
+            description="d", required_skills=["Python", "SQL"],
+        )
+        self.job_half = Job.objects.create(
+            employer=self.emp, title="Half",
+            description="d", required_skills=["Python", "Rust"],
+        )
+        self.job_zero = Job.objects.create(
+            employer=self.emp, title="Zero",
+            description="d", required_skills=["Rust", "Go"],
+        )
+
+    def test_dashboard_sorts_by_score(self):
+        self.client.login(username="candx", password="pw")
+        response = self.client.get(reverse("jobs:candidate_dashboard"))
+        self.assertEqual(response.status_code, 200)
+        jobs_in_order = [item[1].title for item in response.context["scored"]]
+        self.assertEqual(jobs_in_order, ["Full", "Half", "Zero"])
+        scores = [item[0] for item in response.context["scored"]]
+        self.assertEqual(scores, [100, 50, 0])
+
+    def test_deleted_jobs_excluded(self):
+        self.job_zero.is_deleted = True
+        self.job_zero.save()
+        self.client.login(username="candx", password="pw")
+        response = self.client.get(reverse("jobs:candidate_dashboard"))
+        titles = [item[1].title for item in response.context["scored"]]
+        self.assertNotIn("Zero", titles)
+
+    def test_employer_cannot_access_dashboard(self):
+        self.client.login(username="empx", password="pw")
+        response = self.client.get(reverse("jobs:candidate_dashboard"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_job_detail_shows_score_for_candidate(self):
+        self.client.login(username="candx", password="pw")
+        response = self.client.get(reverse("jobs:job_detail", args=[self.job_full.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["score"], 100)
+
+    def test_job_detail_404_for_deleted(self):
+        self.job_zero.is_deleted = True
+        self.job_zero.save()
+        self.client.login(username="candx", password="pw")
+        response = self.client.get(reverse("jobs:job_detail", args=[self.job_zero.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_dashboard_renders_score_in_html(self):
+        self.client.login(username="candx", password="pw")
+        response = self.client.get(reverse("jobs:candidate_dashboard"))
+        self.assertContains(response, "Match: 100%")
+        self.assertContains(response, "Match: 50%")
+        self.assertContains(response, "Match: 0%")

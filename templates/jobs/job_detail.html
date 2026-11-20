@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ job.title }}{% endblock %}
+{% block content %}
+<h1>{{ job.title }}</h1>
+<p><strong>Company:</strong> {{ job.employer.employer_profile.company_name|default:job.employer.username }}</p>
+<p><strong>Required skills:</strong>
+{% if job.required_skills %}{{ job.required_skills|join:", " }}{% else %}(none){% endif %}</p>
+{% if score is not None %}
+<p><strong>Your match score:</strong> {{ score }}%</p>
+{% endif %}
+<h2>Description</h2>
+<p>{{ job.description|linebreaks }}</p>
+<p><a href="{% url 'jobs:candidate_dashboard' %}">Back to jobs</a></p>
+{% endblock %}

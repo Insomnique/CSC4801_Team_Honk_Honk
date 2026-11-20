@@ -268,3 +268,77 @@ class CandidateDashboardTests(TestCase):
         self.assertContains(response, "Match: 100%")
         self.assertContains(response, "Match: 50%")
         self.assertContains(response, "Match: 0%")
+
+from .models import Application
+
+
+class ApplicationTests(TestCase):
+    def setUp(self):
+        self.cand = User.objects.create_user(
+            username="acand", email="ac@e.com", password="pw", role="candidate"
+        )
+        self.other_cand = User.objects.create_user(
+            username="bcand", email="bc@e.com", password="pw", role="candidate"
+        )
+        self.emp = User.objects.create_user(
+            username="aemp", email="ae@e.com", password="pw", role="employer"
+        )
+        self.job = Job.objects.create(
+            employer=self.emp, title="Dev", description="d",
+            required_skills=["Python"],
+        )
+
+    def test_candidate_can_apply(self):
+        self.client.login(username="acand", password="pw")
+        response = self.client.post(reverse("jobs:apply_to_job", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 302)
+        app = Application.objects.get(candidate=self.cand, job=self.job)
+        self.assertEqual(app.status, "pending")
+
+    def test_duplicate_apply_returns_409(self):
+        self.client.login(username="acand", password="pw")
+        self.client.post(reverse("jobs:apply_to_job", args=[self.job.pk]))
+        response = self.client.post(reverse("jobs:apply_to_job", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            Application.objects.filter(candidate=self.cand, job=self.job).count(), 1
+        )
+
+    def test_employer_cannot_apply(self):
+        self.client.login(username="aemp", password="pw")
+        response = self.client.post(reverse("jobs:apply_to_job", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_unauthenticated_redirected(self):
+        response = self.client.post(reverse("jobs:apply_to_job", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response.url)
+
+    def test_apply_to_deleted_job_404(self):
+        self.job.is_deleted = True
+        self.job.save()
+        self.client.login(username="acand", password="pw")
+        response = self.client.post(reverse("jobs:apply_to_job", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_my_applications_shows_only_own(self):
+        Application.objects.create(candidate=self.cand, job=self.job)
+        Application.objects.create(candidate=self.other_cand, job=self.job)
+        self.client.login(username="acand", password="pw")
+        response = self.client.get(reverse("jobs:my_applications"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["apps"]), 1)
+        self.assertEqual(response.context["apps"][0].candidate, self.cand)
+
+    def test_employer_cannot_see_my_applications(self):
+        self.client.login(username="aemp", password="pw")
+        response = self.client.get(reverse("jobs:my_applications"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_delete_job_with_application_returns_409(self):
+        Application.objects.create(candidate=self.cand, job=self.job)
+        self.client.login(username="aemp", password="pw")
+        response = self.client.post(reverse("jobs:job_delete", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 409)
+        self.job.refresh_from_db()
+        self.assertFalse(self.job.is_deleted)

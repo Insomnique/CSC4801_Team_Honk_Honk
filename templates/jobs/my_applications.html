@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}My applications{% endblock %}
+{% block content %}
+<h1>My applications</h1>
+{% if apps %}
+<table border="1" cellpadding="6">
+    <thead>
+        <tr><th>Job</th><th>Company</th><th>Status</th><th>Interview</th></tr>
+    </thead>
+    <tbody>
+    {% for app in apps %}
+        <tr>
+            <td><a href="{% url 'jobs:job_detail' app.job.pk %}">{{ app.job.title }}</a></td>
+            <td>{{ app.job.employer.employer_profile.company_name|default:app.job.employer.username }}</td>
+            <td>{{ app.get_status_display }}</td>
+            <td>{% if app.has_booking %}Booked{% else %}—{% endif %}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>You haven't applied to any jobs yet.</p>
+{% endif %}
+{% endblock %}

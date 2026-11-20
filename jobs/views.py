@@ -1,4 +1,5 @@
 from django.contrib.auth.decorators import login_required
+from django.db import IntegrityError, transaction
 from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -6,7 +7,7 @@ from accounts.models import CandidateProfile
 
 from .forms import JobForm
 from .matching import candidate_job_sort_key, match_score
-from .models import Job
+from .models import Application, Job
 
 
 def _employer_or_403(request):
@@ -94,3 +95,30 @@ def job_detail(request, pk):
         profile, _ = CandidateProfile.objects.get_or_create(user=request.user)
         score = match_score(profile.skills, job.required_skills)
     return render(request, "jobs/job_detail.html", {"job": job, "score": score})
+
+@login_required
+def apply_to_job(request, pk):
+    if request.user.role != "candidate":
+        return HttpResponseForbidden("Only candidates can apply.")
+    job = get_object_or_404(Job, pk=pk, is_deleted=False)
+    if request.method != "POST":
+        return HttpResponseForbidden("Apply via POST.")
+    try:
+        with transaction.atomic():
+            Application.objects.create(
+                candidate=request.user, job=job, status=Application.Status.PENDING
+            )
+    except IntegrityError:
+        return HttpResponse("You have already applied to this job.", status=409)
+    return redirect("jobs:my_applications")
+
+
+@login_required
+def my_applications(request):
+    if request.user.role != "candidate":
+        return HttpResponseForbidden("Only candidates have applications.")
+    apps = (
+        Application.objects.filter(candidate=request.user)
+        .select_related("job", "job__employer", "job__employer__employer_profile")
+    )
+    return render(request, "jobs/my_applications.html", {"apps": apps})

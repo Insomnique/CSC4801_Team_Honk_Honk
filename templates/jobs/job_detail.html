@@ -10,5 +10,13 @@
 {% endif %}
 <h2>Description</h2>
 <p>{{ job.description|linebreaks }}</p>
+
+{% if user.role == "candidate" %}
+<form method="post" action="{% url 'jobs:apply_to_job' job.pk %}">
+    {% csrf_token %}
+    <button type="submit">Apply</button>
+</form>
+{% endif %}
+
 <p><a href="{% url 'jobs:candidate_dashboard' %}">Back to jobs</a></p>
 {% endblock %}

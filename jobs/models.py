@@ -21,7 +21,38 @@ class Job(models.Model):
         return self.title
 
     def has_dependents(self):
-        # TODO: uncomment when Application and Slot models exist
-        # if self.applications.exists(): return True
-        # if self.slots.exists(): return True
+        if self.applications.exists():
+            return True
+        # slots check added when Slot model exists (FP-SCHED-1)
         return False
+    
+class Application(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        INTERVIEWING = "interviewing", "Interviewing"
+        REJECTED = "rejected", "Rejected"
+        ACCEPTED = "accepted", "Accepted"
+
+    candidate = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="applications",
+    )
+    job = models.ForeignKey(
+        Job, on_delete=models.CASCADE, related_name="applications"
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["candidate", "job"], name="uniq_candidate_job_application"
+            )
+        ]
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"{self.candidate.username} -> {self.job.title} ({self.status})"

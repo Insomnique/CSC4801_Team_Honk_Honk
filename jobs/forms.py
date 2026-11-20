@@ -1,6 +1,8 @@
 from django import forms
-
 from .models import Job
+from datetime import timedelta
+from django.utils import timezone
+from .models import Slot
 
 
 class JobForm(forms.ModelForm):
@@ -27,6 +29,33 @@ class JobForm(forms.ModelForm):
     def save(self, commit=True):
         instance = super().save(commit=False)
         instance.required_skills = self.cleaned_data["required_skills"]
+        if commit:
+            instance.save()
+        return instance
+    
+class SlotForm(forms.ModelForm):
+    class Meta:
+        model = Slot
+        fields = ("start_time",)
+        widgets = {
+            "start_time": forms.DateTimeInput(
+                attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["start_time"].input_formats = ["%Y-%m-%dT%H:%M"]
+
+    def clean_start_time(self):
+        start = self.cleaned_data["start_time"]
+        if start <= timezone.now():
+            raise forms.ValidationError("Slot must be in the future.")
+        return start
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.end_time = instance.start_time + timedelta(minutes=30)
         if commit:
             instance.save()
         return instance

@@ -9,6 +9,9 @@ from .forms import JobForm
 from .matching import candidate_job_sort_key, match_score
 from .models import Application, Job
 
+from .forms import JobForm, SlotForm
+from .models import Application, Job, Slot
+
 
 def _employer_or_403(request):
     if request.user.role != "employer":
@@ -181,3 +184,42 @@ def update_application_status(request, pk):
     app.status = new_status
     app.save()
     return redirect("jobs:job_applicants", pk=app.job.pk)
+
+
+@login_required
+def slot_list(request):
+    if request.user.role != "employer":
+        return HttpResponseForbidden("Only employers manage slots.")
+    slots = Slot.objects.filter(employer=request.user)
+    return render(request, "jobs/slot_list.html", {"slots": slots})
+
+
+@login_required
+def slot_create(request):
+    if request.user.role != "employer":
+        return HttpResponseForbidden("Only employers manage slots.")
+    if request.method == "POST":
+        form = SlotForm(request.POST)
+        if form.is_valid():
+            slot = form.save(commit=False)
+            slot.employer = request.user
+            slot.save()
+            return redirect("jobs:slot_list")
+    else:
+        form = SlotForm()
+    return render(request, "jobs/slot_form.html", {"form": form})
+
+
+@login_required
+def slot_delete(request, pk):
+    if request.user.role != "employer":
+        return HttpResponseForbidden("Only employers manage slots.")
+    slot = get_object_or_404(Slot, pk=pk)
+    if slot.employer_id != request.user.id:
+        return HttpResponseForbidden("Not your slot.")
+    if slot.is_booked():
+        return HttpResponse("Cannot delete a booked slot.", status=409)
+    if request.method == "POST":
+        slot.delete()
+        return redirect("jobs:slot_list")
+    return render(request, "jobs/slot_delete.html", {"slot": slot})

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}My availability slots{% endblock %}
+{% block content %}
+<h1>My availability slots</h1>
+<p><a href="{% url 'jobs:slot_create' %}">+ Add a slot</a></p>
+{% if slots %}
+<table border="1" cellpadding="6">
+    <thead><tr><th>Start</th><th>End</th><th>Booked</th><th></th></tr></thead>
+    <tbody>
+    {% for slot in slots %}
+        <tr>
+            <td>{{ slot.start_time|date:"Y-m-d H:i" }}</td>
+            <td>{{ slot.end_time|date:"Y-m-d H:i" }}</td>
+            <td>{% if slot.is_booked %}Yes{% else %}No{% endif %}</td>
+            <td><a href="{% url 'jobs:slot_delete' slot.pk %}">Delete</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No slots yet.</p>
+{% endif %}
+{% endblock %}

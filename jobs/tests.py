@@ -7,6 +7,10 @@ from .matching import (
     normalize_skills,
 )
 
+from datetime import timedelta
+from django.utils import timezone
+from .models import Slot
+
 class NormalizeSkillsTests(SimpleTestCase):
     def test_trims_lowercases_dedupes(self):
         self.assertEqual(
@@ -437,3 +441,80 @@ class ApplicantManagementTests(TestCase):
         self.assertEqual(response.status_code, 403)
         app_obj.refresh_from_db()
         self.assertEqual(app_obj.status, "pending")
+
+
+
+class SlotTests(TestCase):
+    def setUp(self):
+        self.emp = User.objects.create_user(
+            username="semp", email="s@e.com", password="pw", role="employer"
+        )
+        self.other_emp = User.objects.create_user(
+            username="semp2", email="s2@e.com", password="pw", role="employer"
+        )
+        self.cand = User.objects.create_user(
+            username="scand", email="sc@e.com", password="pw", role="candidate"
+        )
+
+    def _future_dt(self, minutes=60):
+        return (timezone.now() + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M")
+
+    def test_employer_can_create_future_slot(self):
+        self.client.login(username="semp", password="pw")
+        response = self.client.post(reverse("jobs:slot_create"), {
+            "start_time": self._future_dt(60),
+        })
+        self.assertEqual(response.status_code, 302)
+        slot = Slot.objects.get(employer=self.emp)
+        self.assertEqual(slot.duration_minutes, 30)
+        self.assertTrue(slot.is_future())
+
+    def test_past_start_rejected(self):
+        self.client.login(username="semp", password="pw")
+        past = (timezone.now() - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
+        response = self.client.post(reverse("jobs:slot_create"), {"start_time": past})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Slot.objects.count(), 0)
+
+    def test_delete_own_slot(self):
+        slot = Slot.objects.create(
+            employer=self.emp,
+            start_time=timezone.now() + timedelta(hours=1),
+            end_time=timezone.now() + timedelta(hours=1, minutes=30),
+        )
+        self.client.login(username="semp", password="pw")
+        response = self.client.post(reverse("jobs:slot_delete", args=[slot.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Slot.objects.filter(pk=slot.pk).exists())
+
+    def test_delete_other_employers_slot_403(self):
+        slot = Slot.objects.create(
+            employer=self.other_emp,
+            start_time=timezone.now() + timedelta(hours=1),
+            end_time=timezone.now() + timedelta(hours=1, minutes=30),
+        )
+        self.client.login(username="semp", password="pw")
+        response = self.client.post(reverse("jobs:slot_delete", args=[slot.pk]))
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Slot.objects.filter(pk=slot.pk).exists())
+
+    def test_other_employer_slots_not_listed(self):
+        Slot.objects.create(
+            employer=self.emp,
+            start_time=timezone.now() + timedelta(hours=1),
+            end_time=timezone.now() + timedelta(hours=1, minutes=30),
+        )
+        Slot.objects.create(
+            employer=self.other_emp,
+            start_time=timezone.now() + timedelta(hours=2),
+            end_time=timezone.now() + timedelta(hours=2, minutes=30),
+        )
+        self.client.login(username="semp", password="pw")
+        response = self.client.get(reverse("jobs:slot_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["slots"]), 1)
+
+    def test_candidate_cannot_manage_slots(self):
+        self.client.login(username="scand", password="pw")
+        self.assertEqual(self.client.get(reverse("jobs:slot_list")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("jobs:slot_create")).status_code, 403)

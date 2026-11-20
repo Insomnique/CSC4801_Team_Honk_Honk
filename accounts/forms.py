@@ -1,7 +1,6 @@
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
-
-from .models import User
+from .models import User, CandidateProfile, EmployerProfile
 
 
 class RegisterForm(UserCreationForm):
@@ -26,3 +25,39 @@ class RegisterForm(UserCreationForm):
         if commit:
             user.save()
         return user
+    
+class CandidateProfileForm(forms.ModelForm):
+    skills = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={"placeholder": "Python, SQL, Rust"}),
+        help_text="Comma-separated. Example: Python, SQL, Rust",
+    )
+
+    class Meta:
+        model = CandidateProfile
+        fields = ("display_name", "skills", "resume_text")
+        widgets = {"resume_text": forms.Textarea(attrs={"rows": 10})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Pre-fill the input with a comma-separated string when editing
+        if self.instance and isinstance(self.instance.skills, list):
+            self.fields["skills"].initial = ", ".join(self.instance.skills)
+
+    def clean_skills(self):
+        raw = self.cleaned_data.get("skills") or ""
+        return [p.strip() for p in raw.split(",") if p.strip()]
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.skills = self.cleaned_data["skills"]
+        if commit:
+            instance.save()
+        return instance
+
+
+class EmployerProfileForm(forms.ModelForm):
+    class Meta:
+        model = EmployerProfile
+        fields = ("company_name", "description")
+        widgets = {"description": forms.Textarea(attrs={"rows": 10})}

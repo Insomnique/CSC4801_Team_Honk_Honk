@@ -125,3 +125,49 @@ class AuthRequiredTests(TestCase):
         self.client.login(username="e1", password="testpass123")
         response = self.client.get(reverse("accounts:dashboard"))
         self.assertTemplateUsed(response, "accounts/employer_dashboard.html")
+
+class ProfileTests(TestCase):
+    def test_candidate_can_edit_own_profile(self):
+        u = User.objects.create_user(username="cp", email="cp@e.com",
+                                     password="pw", role="candidate")
+        self.client.login(username="cp", password="pw")
+        response = self.client.post(reverse("accounts:candidate_profile"), {
+            "display_name": "Alice",
+            "skills": "Python, SQL",
+            "resume_text": "Experienced dev.",
+        })
+        self.assertEqual(response.status_code, 302)
+        u.candidate_profile.refresh_from_db()
+        self.assertEqual(u.candidate_profile.display_name, "Alice")
+        self.assertEqual(u.candidate_profile.skills, ["Python", "SQL"])
+
+    def test_candidate_profile_403_for_employer(self):
+        u = User.objects.create_user(username="ep", email="ep@e.com",
+                                     password="pw", role="employer")
+        self.client.login(username="ep", password="pw")
+        response = self.client.get(reverse("accounts:candidate_profile"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_employer_can_edit_own_profile(self):
+        u = User.objects.create_user(username="em", email="em@e.com",
+                                     password="pw", role="employer")
+        self.client.login(username="em", password="pw")
+        response = self.client.post(reverse("accounts:employer_profile"), {
+            "company_name": "Honk Inc",
+            "description": "We honk.",
+        })
+        self.assertEqual(response.status_code, 302)
+        u.employer_profile.refresh_from_db()
+        self.assertEqual(u.employer_profile.company_name, "Honk Inc")
+
+    def test_employer_profile_403_for_candidate(self):
+        u = User.objects.create_user(username="c2", email="c2@e.com",
+                                     password="pw", role="candidate")
+        self.client.login(username="c2", password="pw")
+        response = self.client.get(reverse("accounts:employer_profile"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_profile_requires_login(self):
+        response = self.client.get(reverse("accounts:candidate_profile"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response.url)

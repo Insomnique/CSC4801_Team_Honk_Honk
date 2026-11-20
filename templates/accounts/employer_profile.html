@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}My company profile{% endblock %}
+{% block content %}
+<h1>My company profile</h1>
+<form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Save</button>
+</form>
+{% endblock %}

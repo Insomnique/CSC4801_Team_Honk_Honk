@@ -342,3 +342,98 @@ class ApplicationTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.job.refresh_from_db()
         self.assertFalse(self.job.is_deleted)
+
+class ApplicantManagementTests(TestCase):
+    def setUp(self):
+        from accounts.models import CandidateProfile
+
+        self.emp = User.objects.create_user(username="mgr", email="m@e.com", password="pw", role="employer")
+        self.other_emp = User.objects.create_user(username="mgr2", email="m2@e.com", password="pw", role="employer")
+
+        # Candidates: Alice (Python, SQL), Bob (Python), Charlie (Rust), Dave (Python, SQL) for tie test
+        self.alice = User.objects.create_user(username="alice", email="a@e.com", password="pw", role="candidate")
+        CandidateProfile.objects.create(user=self.alice, display_name="Alice", skills=["Python", "SQL"])
+        self.bob = User.objects.create_user(username="bob", email="b@e.com", password="pw", role="candidate")
+        CandidateProfile.objects.create(user=self.bob, display_name="Bob", skills=["Python"])
+        self.charlie = User.objects.create_user(username="charlie", email="c@e.com", password="pw", role="candidate")
+        CandidateProfile.objects.create(user=self.charlie, display_name="Charlie", skills=["Rust"])
+        self.dave = User.objects.create_user(username="dave", email="d@e.com", password="pw", role="candidate")
+        CandidateProfile.objects.create(user=self.dave, display_name="dave", skills=["Python", "SQL"])
+
+        self.job = Job.objects.create(
+            employer=self.emp, title="Dev", description="d",
+            required_skills=["Python", "SQL"],
+        )
+        for u in (self.alice, self.bob, self.charlie, self.dave):
+            Application.objects.create(candidate=u, job=self.job)
+
+    def test_applicants_sorted_by_score_then_name(self):
+        self.client.login(username="mgr", password="pw")
+        response = self.client.get(reverse("jobs:job_applicants", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 200)
+        names = [app.candidate.candidate_profile.display_name for _, app in response.context["scored"]]
+        # Alice and Dave both 100 (tie), Alice before Dave (ci). Bob 50, Charlie 0.
+        self.assertEqual(names, ["Alice", "dave", "Bob", "Charlie"])
+
+    def test_scores_reflect_skills(self):
+        self.client.login(username="mgr", password="pw")
+        response = self.client.get(reverse("jobs:job_applicants", args=[self.job.pk]))
+        scores = {app.candidate.username: s for s, app in response.context["scored"]}
+        self.assertEqual(scores["alice"], 100)
+        self.assertEqual(scores["bob"], 50)
+        self.assertEqual(scores["charlie"], 0)
+
+    def test_other_employer_cannot_view_applicants(self):
+        self.client.login(username="mgr2", password="pw")
+        response = self.client.get(reverse("jobs:job_applicants", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_candidate_cannot_view_applicants(self):
+        self.client.login(username="alice", password="pw")
+        response = self.client.get(reverse("jobs:job_applicants", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_employer_can_update_status(self):
+        app_obj = Application.objects.get(candidate=self.alice, job=self.job)
+        self.client.login(username="mgr", password="pw")
+        for status in ("interviewing", "rejected", "accepted", "pending"):
+            response = self.client.post(
+                reverse("jobs:update_application_status", args=[app_obj.pk]),
+                {"status": status},
+            )
+            self.assertEqual(response.status_code, 302)
+            app_obj.refresh_from_db()
+            self.assertEqual(app_obj.status, status)
+
+    def test_invalid_status_rejected(self):
+        app_obj = Application.objects.get(candidate=self.alice, job=self.job)
+        self.client.login(username="mgr", password="pw")
+        response = self.client.post(
+            reverse("jobs:update_application_status", args=[app_obj.pk]),
+            {"status": "bogus"},
+        )
+        self.assertEqual(response.status_code, 400)
+        app_obj.refresh_from_db()
+        self.assertEqual(app_obj.status, "pending")
+
+    def test_other_employer_cannot_update_status(self):
+        app_obj = Application.objects.get(candidate=self.alice, job=self.job)
+        self.client.login(username="mgr2", password="pw")
+        response = self.client.post(
+            reverse("jobs:update_application_status", args=[app_obj.pk]),
+            {"status": "accepted"},
+        )
+        self.assertEqual(response.status_code, 403)
+        app_obj.refresh_from_db()
+        self.assertEqual(app_obj.status, "pending")
+
+    def test_candidate_cannot_update_status(self):
+        app_obj = Application.objects.get(candidate=self.alice, job=self.job)
+        self.client.login(username="alice", password="pw")
+        response = self.client.post(
+            reverse("jobs:update_application_status", args=[app_obj.pk]),
+            {"status": "accepted"},
+        )
+        self.assertEqual(response.status_code, 403)
+        app_obj.refresh_from_db()
+        self.assertEqual(app_obj.status, "pending")

@@ -9,6 +9,7 @@
         <li>
             <strong>{{ job.title }}</strong>
             — required: {% if job.required_skills %}{{ job.required_skills|join:", " }}{% else %}(none){% endif %}
+            | <a href="{% url 'jobs:job_applicants' job.pk %}">Applicants</a>
             | <a href="{% url 'jobs:job_edit' job.pk %}">Edit</a>
             | <a href="{% url 'jobs:job_delete' job.pk %}">Delete</a>
         </li>

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Applicants for {{ job.title }}{% endblock %}
+{% block content %}
+<h1>Applicants for "{{ job.title }}"</h1>
+<p><a href="{% url 'jobs:job_list' %}">Back to jobs</a></p>
+
+{% if scored %}
+<table border="1" cellpadding="6">
+    <thead>
+        <tr>
+            <th>Candidate</th>
+            <th>Skills</th>
+            <th>Match</th>
+            <th>Status</th>
+            <th>Update</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for score, app in scored %}
+        <tr>
+            <td>
+                {% if app.candidate.candidate_profile.display_name %}
+                    {{ app.candidate.candidate_profile.display_name }}
+                {% else %}
+                    {{ app.candidate.username }}
+                {% endif %}
+            </td>
+            <td>
+                {% if app.candidate.candidate_profile.skills %}
+                    {{ app.candidate.candidate_profile.skills|join:", " }}
+                {% else %}—{% endif %}
+            </td>
+            <td>{{ score }}%</td>
+            <td>{{ app.get_status_display }}</td>
+            <td>
+                <form method="post" action="{% url 'jobs:update_application_status' app.pk %}">
+                    {% csrf_token %}
+                    <select name="status">
+                        <option value="pending" {% if app.status == "pending" %}selected{% endif %}>Pending</option>
+                        <option value="interviewing" {% if app.status == "interviewing" %}selected{% endif %}>Interviewing</option>
+                        <option value="rejected" {% if app.status == "rejected" %}selected{% endif %}>Rejected</option>
+                        <option value="accepted" {% if app.status == "accepted" %}selected{% endif %}>Accepted</option>
+                    </select>
+                    <button type="submit">Update</button>
+                </form>
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No applicants yet.</p>
+{% endif %}
+{% endblock %}

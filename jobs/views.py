@@ -122,3 +122,62 @@ def my_applications(request):
         .select_related("job", "job__employer", "job__employer__employer_profile")
     )
     return render(request, "jobs/my_applications.html", {"apps": apps})
+
+@login_required
+def job_applicants(request, pk):
+    if request.user.role != "employer":
+        return HttpResponseForbidden("Only employers can view applicants.")
+    job = get_object_or_404(Job, pk=pk, is_deleted=False)
+    if job.employer_id != request.user.id:
+        return HttpResponseForbidden("Not your job.")
+
+    apps = (
+        Application.objects.filter(job=job)
+        .select_related("candidate", "candidate__candidate_profile")
+    )
+    scored = [
+        (
+            match_score(
+                getattr(app.candidate.candidate_profile, "skills", [])
+                if hasattr(app.candidate, "candidate_profile") else [],
+                job.required_skills,
+            ),
+            app,
+        )
+        for app in apps
+    ]
+    # Sort by score desc, then display name (ci), then candidate id
+    scored.sort(
+        key=lambda pair: (
+            -pair[0],
+            (
+                getattr(pair[1].candidate, "candidate_profile", None)
+                and pair[1].candidate.candidate_profile.display_name
+                or pair[1].candidate.username
+            ).lower(),
+            pair[1].candidate.id,
+        )
+    )
+
+    return render(request, "jobs/job_applicants.html", {"job": job, "scored": scored})
+
+
+@login_required
+def update_application_status(request, pk):
+    if request.user.role != "employer":
+        return HttpResponseForbidden("Only employers can change status.")
+    if request.method != "POST":
+        return HttpResponseForbidden("POST only.")
+
+    app = get_object_or_404(Application, pk=pk)
+    if app.job.employer_id != request.user.id:
+        return HttpResponseForbidden("Not your job's application.")
+
+    new_status = request.POST.get("status", "")
+    valid = {c[0] for c in Application.Status.choices}
+    if new_status not in valid:
+        return HttpResponse("Invalid status.", status=400)
+
+    app.status = new_status
+    app.save()
+    return redirect("jobs:job_applicants", pk=app.job.pk)

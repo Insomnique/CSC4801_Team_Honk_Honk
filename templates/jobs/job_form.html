@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ mode }} job{% endblock %}
+{% block content %}
+<h1>{{ mode }} job</h1>
+<form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Save</button>
+</form>
+<p><a href="{% url 'jobs:job_list' %}">Back to jobs</a></p>
+{% endblock %}

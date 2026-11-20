@@ -7,7 +7,6 @@ from .matching import (
     normalize_skills,
 )
 
-
 class NormalizeSkillsTests(SimpleTestCase):
     def test_trims_lowercases_dedupes(self):
         self.assertEqual(
@@ -109,3 +108,95 @@ class EmployerSortKeyTests(SimpleTestCase):
         pairs = [(50, _FakeUser(5, "Same")), (50, _FakeUser(2, "same"))]
         sorted_pairs = sorted(pairs, key=employer_applicant_sort_key)
         self.assertEqual([u.id for _, u in sorted_pairs], [2, 5])
+
+from django.test import TestCase
+from django.urls import reverse
+
+from accounts.models import User
+from .models import Job
+
+
+class JobCrudTests(TestCase):
+    def setUp(self):
+        self.emp = User.objects.create_user(
+            username="emp1", email="e1@e.com", password="pw", role="employer"
+        )
+        self.other_emp = User.objects.create_user(
+            username="emp2", email="e2@e.com", password="pw", role="employer"
+        )
+        self.cand = User.objects.create_user(
+            username="cand1", email="c1@e.com", password="pw", role="candidate"
+        )
+
+    def test_employer_can_create_job(self):
+        self.client.login(username="emp1", password="pw")
+        response = self.client.post(reverse("jobs:job_create"), {
+            "title": "Backend Dev",
+            "description": "Write code.",
+            "required_skills": "Python, SQL",
+        })
+        self.assertEqual(response.status_code, 302)
+        job = Job.objects.get(title="Backend Dev")
+        self.assertEqual(job.employer, self.emp)
+        self.assertEqual(job.required_skills, ["Python", "SQL"])
+
+    def test_empty_title_rejected(self):
+        self.client.login(username="emp1", password="pw")
+        response = self.client.post(reverse("jobs:job_create"), {
+            "title": "", "description": "x", "required_skills": "",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Job.objects.count(), 0)
+
+    def test_employer_list_shows_only_own_jobs(self):
+        Job.objects.create(employer=self.emp, title="MyOnlyJob", description="x")
+        Job.objects.create(employer=self.other_emp, title="NotMineJob", description="x")
+        self.client.login(username="emp1", password="pw")
+        response = self.client.get(reverse("jobs:job_list"))
+        self.assertContains(response, "MyOnlyJob")
+        self.assertNotContains(response, "NotMineJob")
+
+    def test_edit_own_job(self):
+        job = Job.objects.create(employer=self.emp, title="Old", description="x")
+        self.client.login(username="emp1", password="pw")
+        response = self.client.post(reverse("jobs:job_edit", args=[job.pk]), {
+            "title": "New", "description": "x", "required_skills": "",
+        })
+        self.assertEqual(response.status_code, 302)
+        job.refresh_from_db()
+        self.assertEqual(job.title, "New")
+
+    def test_edit_other_employers_job_403(self):
+        job = Job.objects.create(employer=self.other_emp, title="X", description="x")
+        self.client.login(username="emp1", password="pw")
+        response = self.client.get(reverse("jobs:job_edit", args=[job.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_delete_own_empty_job_soft_deletes(self):
+        job = Job.objects.create(employer=self.emp, title="X", description="x")
+        self.client.login(username="emp1", password="pw")
+        response = self.client.post(reverse("jobs:job_delete", args=[job.pk]))
+        self.assertEqual(response.status_code, 302)
+        job.refresh_from_db()
+        self.assertTrue(job.is_deleted)
+
+    def test_delete_other_employers_job_403(self):
+        job = Job.objects.create(employer=self.other_emp, title="X", description="x")
+        self.client.login(username="emp1", password="pw")
+        response = self.client.post(reverse("jobs:job_delete", args=[job.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_missing_job_returns_404(self):
+        self.client.login(username="emp1", password="pw")
+        response = self.client.get(reverse("jobs:job_edit", args=[99999]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_candidate_cannot_access_employer_jobs(self):
+        self.client.login(username="cand1", password="pw")
+        response = self.client.get(reverse("jobs:job_list"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_unauthenticated_redirected(self):
+        response = self.client.get(reverse("jobs:job_list"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response.url)

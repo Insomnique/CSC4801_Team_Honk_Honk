@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}My jobs{% endblock %}
+{% block content %}
+<h1>My job postings</h1>
+<p><a href="{% url 'jobs:job_create' %}">+ Post a new job</a></p>
+{% if jobs %}
+    <ul>
+    {% for job in jobs %}
+        <li>
+            <strong>{{ job.title }}</strong>
+            — required: {% if job.required_skills %}{{ job.required_skills|join:", " }}{% else %}(none){% endif %}
+            | <a href="{% url 'jobs:job_edit' job.pk %}">Edit</a>
+            | <a href="{% url 'jobs:job_delete' job.pk %}">Delete</a>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>No jobs yet.</p>
+{% endif %}
+{% endblock %}

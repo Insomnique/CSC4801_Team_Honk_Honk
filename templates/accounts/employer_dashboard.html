@@ -2,5 +2,12 @@
 {% block title %}Employer dashboard{% endblock %}
 {% block content %}
 <h1>Employer dashboard</h1>
-<p>Welcome, {{ user.username }}. This is where your jobs and applicants will appear.</p>
+<p>Welcome, {{ user.username }}{% if user.employer_profile.company_name %} from {{ user.employer_profile.company_name }}{% endif %}.</p>
+
+<h2>Quick actions</h2>
+<ul>
+    <li><a href="{% url 'jobs:job_list' %}">My job postings</a> — create, edit, delete jobs; view applicants</li>
+    <li><a href="{% url 'jobs:slot_list' %}">My availability slots</a> — offer interview times</li>
+    <li><a href="{% url 'accounts:employer_profile' %}">Edit company profile</a> — update company name and description</li>
+</ul>
 {% endblock %}

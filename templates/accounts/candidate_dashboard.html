@@ -2,5 +2,19 @@
 {% block title %}Candidate dashboard{% endblock %}
 {% block content %}
 <h1>Candidate dashboard</h1>
-<p>Welcome, {{ user.username }}. This is where jobs and applications will appear.</p>
+<p>Welcome, {{ user.username }}.</p>
+
+<h2>Quick actions</h2>
+<ul>
+    <li><a href="{% url 'jobs:candidate_dashboard' %}">Browse recommended jobs</a> — see jobs ranked by your skill match</li>
+    <li><a href="{% url 'jobs:my_applications' %}">My applications</a> — track status and book interviews</li>
+    <li><a href="{% url 'accounts:candidate_profile' %}">Edit my profile</a> — update skills and resume</li>
+</ul>
+
+{% if user.candidate_profile.skills %}
+<p><strong>Your skills:</strong> {{ user.candidate_profile.skills|join:", " }}</p>
+{% else %}
+<p><em>You haven't added any skills yet — the match scores will all be 0% until you do.</em>
+   <a href="{% url 'accounts:candidate_profile' %}">Add skills now</a>.</p>
+{% endif %}
 {% endblock %}

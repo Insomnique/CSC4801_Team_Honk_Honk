@@ -8,14 +8,23 @@
     <nav>
         <a href="{% url 'accounts:dashboard' %}">Dashboard</a>
         {% if user.is_authenticated %}
-            <span>Logged in as {{ user.username }} ({{ user.role }})</span>
+            {% if user.role == "candidate" %}
+                | <a href="{% url 'jobs:candidate_dashboard' %}">Browse jobs</a>
+                | <a href="{% url 'jobs:my_applications' %}">My applications</a>
+                | <a href="{% url 'accounts:candidate_profile' %}">My profile</a>
+            {% elif user.role == "employer" %}
+                | <a href="{% url 'jobs:job_list' %}">My jobs</a>
+                | <a href="{% url 'jobs:slot_list' %}">My slots</a>
+                | <a href="{% url 'accounts:employer_profile' %}">Company profile</a>
+            {% endif %}
+            | <span>Logged in as {{ user.username }} ({{ user.role }})</span>
             <form method="post" action="{% url 'accounts:logout' %}" style="display:inline">
                 {% csrf_token %}
                 <button type="submit">Log out</button>
             </form>
         {% else %}
-            <a href="{% url 'accounts:login' %}">Log in</a>
-            <a href="{% url 'accounts:register' %}">Register</a>
+            | <a href="{% url 'accounts:login' %}">Log in</a>
+            | <a href="{% url 'accounts:register' %}">Register</a>
         {% endif %}
     </nav>
     <hr>

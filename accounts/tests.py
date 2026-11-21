@@ -171,3 +171,7 @@ class ProfileTests(TestCase):
         response = self.client.get(reverse("accounts:candidate_profile"))
         self.assertEqual(response.status_code, 302)
         self.assertIn("/accounts/login/", response.url)
+
+    def test_root_redirects_to_dashboard(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 302)

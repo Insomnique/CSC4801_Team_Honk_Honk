@@ -9,9 +9,13 @@ from .matching import (
 
 from datetime import timedelta
 from django.utils import timezone
-from .models import Slot
-from .models import Booking
+
 from django.db import IntegrityError
+
+from django.test import TestCase
+from django.urls import reverse
+from accounts.models import User
+from .models import Job, Application, Slot, Booking
 
 class NormalizeSkillsTests(SimpleTestCase):
     def test_trims_lowercases_dedupes(self):
@@ -115,8 +119,6 @@ class EmployerSortKeyTests(SimpleTestCase):
         sorted_pairs = sorted(pairs, key=employer_applicant_sort_key)
         self.assertEqual([u.id for _, u in sorted_pairs], [2, 5])
 
-from django.test import TestCase
-from django.urls import reverse
 
 from accounts.models import User
 from .models import Job
@@ -612,6 +614,11 @@ class BookingEligibilityTests(TestCase):
         self.assertEqual(Booking.objects.filter(application=self.app).count(), 1)
         self.assertTrue(self.slot.is_booked())
 
+    def test_bookable_slots_page_loads(self):
+        self.client.login(username="bcand", password="pw")
+        response = self.client.get(reverse("jobs:bookable_slots", args=[self.app.pk]))
+        self.assertEqual(response.status_code, 200)
+
 
 class AtomicityTests(TestCase):
     """FP-SCHED-3: DB-level constraint, not application-level check."""
@@ -636,3 +643,60 @@ class AtomicityTests(TestCase):
             with transaction.atomic():
                 Booking.objects.create(application=self.app2, slot=self.slot)
         self.assertEqual(Booking.objects.filter(slot=self.slot).count(), 1)
+
+
+class SecurityTests(TestCase):
+    def setUp(self):
+        from accounts.models import CandidateProfile
+        self.emp = User.objects.create_user(username="sec_emp", email="se@e.com", password="pw", role="employer")
+        self.cand = User.objects.create_user(username="sec_cand", email="sc@e.com", password="pw", role="candidate")
+        CandidateProfile.objects.create(user=self.cand, display_name="Sec Cand", skills=["Python"])
+
+    def test_sql_injection_is_bound_not_executed(self):
+        """FP-SEC-2: SQL metacharacters are stored as literal data."""
+        self.client.login(username="sec_emp", password="pw")
+        payload = "'; DROP TABLE jobs_job; --"
+        response = self.client.post(reverse("jobs:job_create"), {
+            "title": payload,
+            "description": "test",
+            "required_skills": "",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Job.objects.count(), 1)
+        job = Job.objects.get()
+        self.assertEqual(job.title, payload)
+
+    def test_xss_payload_is_escaped(self):
+        """FP-SEC-3: <script> is escaped in rendered HTML."""
+        self.client.login(username="sec_emp", password="pw")
+        payload = "<script>alert(1)</script>"
+        self.client.post(reverse("jobs:job_create"), {
+            "title": payload,
+            "description": "test",
+            "required_skills": "",
+        })
+        job = Job.objects.get()
+        self.client.logout()
+
+        self.client.login(username="sec_cand", password="pw")
+        response = self.client.get(reverse("jobs:job_detail", args=[job.pk]))
+        self.assertContains(response, "&lt;script&gt;")
+        self.assertNotContains(response, "<script>alert(1)</script>")
+
+    def test_candidate_sees_own_profile_not_others(self):
+        """FP-SEC-1: candidate cannot read another candidate's resume."""
+        from accounts.models import CandidateProfile
+        other = User.objects.create_user(username="sec_cand2", email="sc2@e.com", password="pw", role="candidate")
+        CandidateProfile.objects.create(user=other, display_name="Other", skills=["Rust"], resume_text="secret resume")
+
+        self.client.login(username="sec_cand", password="pw")
+        response = self.client.get(reverse("accounts:candidate_profile"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "secret resume")
+        self.assertNotContains(response, "Other")
+
+    def test_employer_cannot_view_candidate_profile_url(self):
+        """FP-SEC-1: employer hitting candidate profile URL gets 403."""
+        self.client.login(username="sec_emp", password="pw")
+        response = self.client.get(reverse("accounts:candidate_profile"))
+        self.assertEqual(response.status_code, 403)

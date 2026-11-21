@@ -18,6 +18,6 @@ urlpatterns = [
     path("<int:pk>/applicants/", views.job_applicants, name="job_applicants"),
     path("<int:pk>/edit/", views.job_edit, name="job_edit"),
     path("<int:pk>/delete/", views.job_delete, name="job_delete"),
-    path("applications/<int:pk>/slots/", views.bookable_slots, name="bookable_slots"),
+    path("applications/<int:application_pk>/slots/", views.bookable_slots, name="bookable_slots"),
     path("slots/<int:slot_pk>/book/", views.book_slot, name="book_slot"),
 ]

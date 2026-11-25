@@ -69,6 +69,24 @@
         font-weight: 700;
         margin: 0;
     }
+    /* Title and "View all" stay fixed; only the list scrolls */
+    .dash-card.jobs,
+    .dash-card.apps {
+        overflow: hidden;              /* the card itself never scrolls */
+    }
+    .mini-scroll {
+        flex: 1;                       /* fills the space between the title and "View all" */
+        min-height: 0;                 /* lets it shrink so it can scroll */
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+    .mini-title {
+        min-width: 0;
+        overflow-wrap: anywhere;       /* long job names wrap instead of stretching the row */
+    }
+    .more-link {
+        flex-shrink: 0;                /* never squeezed or moved */
+    }
 
     /* Profile */
     .profile-row {
@@ -409,16 +427,18 @@
                     <h2>Recommended Jobs</h2>
                 </div>
                 {% if recommended %}
-                    <ul class="mini-list">
-                        {% for score, job in recommended %}
-                            <li>
-                                <span class="mini-title">{{ job.title }}</span>
-                                <span class="mini-meta">
-                                    {{ job.employer.employer_profile.company_name|default:job.employer.username }} · {{ score }}%
-                                </span>
-                            </li>
-                        {% endfor %}
-                    </ul>
+                    <div class="mini-scroll">
+                        <ul class="mini-list">
+                            {% for score, job in recommended %}
+                                <li>
+                                    <span class="mini-title">{{ job.title }}</span>
+                                    <span class="mini-meta">
+                                        {{ job.employer.employer_profile.company_name|default:job.employer.username }} · {{ score }}%
+                                    </span>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
                     <p class="more-link">View all →</p>
                 {% else %}
                     <p class="empty-note">No jobs available right now.</p>
@@ -436,14 +456,16 @@
                     <h2>My Applications</h2>
                 </div>
                 {% if applications %}
-                    <ul class="mini-list">
-                        {% for app in applications %}
-                            <li>
-                                <span class="mini-title">{{ app.job.title }}</span>
-                                <span class="mini-meta">{{ app.get_status_display }}</span>
-                            </li>
-                        {% endfor %}
-                    </ul>
+                    <div class="mini-scroll">
+                        <ul class="mini-list">
+                            {% for app in applications %}
+                                <li>
+                                    <span class="mini-title">{{ app.job.title }}</span>
+                                    <span class="mini-meta">{{ app.get_status_display }}</span>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
                     <p class="more-link">View all →</p>
                 {% else %}
                     <p class="empty-note">No applications yet. Browse jobs to get started.</p>

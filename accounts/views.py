@@ -41,8 +41,46 @@ def register(request):
 @login_required
 def dashboard(request):
     if request.user.role == "employer":
-        return render(request, "accounts/employer_dashboard.html")
-    
+        profile, _ = EmployerProfile.objects.get_or_create(user=request.user)
+
+        # First 3 job postings (newest first)
+        jobs = (
+            Job.objects.filter(employer=request.user, is_deleted=False)
+            .order_by("-pk")[:3]
+        )
+
+        # Only BOOKED slots appear on the calendar (unbooked slots have no Booking)
+        bookings = (
+            Booking.objects.filter(application__job__employer=request.user)
+            .select_related(
+                "slot",
+                "application__candidate",
+                "application__candidate__candidate_profile",
+                "application__job",
+            )
+        )
+        interviews = []
+        for b in bookings:
+            start = b.slot.start_time
+            end = b.slot.end_time
+            cand = b.application.candidate
+            name = (
+                getattr(getattr(cand, "candidate_profile", None), "display_name", "")
+                or cand.username
+            )
+            interviews.append({
+                "date": start.strftime("%Y-%m-%d"),
+                "time": f"{start.strftime('%H:%M')}-{end.strftime('%H:%M')}",
+                "with": name,
+                "job": b.application.job.title,
+            })
+
+        return render(request, "accounts/employer_dashboard.html", {
+            "jobs": jobs,
+            "interviews": interviews,
+            "profile_form": EmployerProfileForm(instance=profile),
+        })
+
     profile, _ = CandidateProfile.objects.get_or_create(user=request.user)
 
     # First 3 applications (same order as My Applications: newest first)

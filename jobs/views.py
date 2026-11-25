@@ -15,6 +15,7 @@ from .models import Application, Job, Slot
 from .models import Application, Booking, Job, Slot
 from django.utils import timezone
 
+from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 
 def _employer_or_403(request):
     if request.user.role != "employer":
@@ -199,20 +200,26 @@ def slot_list(request):
     if request.user.role != "employer":
         return HttpResponseForbidden("Only employers manage slots.")
     slots = Slot.objects.filter(employer=request.user)
-    return render(request, "jobs/slot_list.html", {"slots": slots})
+    return render(request, "jobs/slot_list.html", {"slots": slots, "slot_form": SlotForm()})
 
 
 @login_required
 def slot_create(request):
     if request.user.role != "employer":
         return HttpResponseForbidden("Only employers manage slots.")
+    is_ajax = request.headers.get("x-requested-with") == "XMLHttpRequest"
     if request.method == "POST":
-        form = SlotForm(request.POST)
+        form = SlotForm(request.POST, employer=request.user)
         if form.is_valid():
             slot = form.save(commit=False)
             slot.employer = request.user
             slot.save()
+            if is_ajax:
+                return JsonResponse({"ok": True})
             return redirect("jobs:slot_list")
+        if is_ajax:
+            errors = [str(e) for errs in form.errors.values() for e in errs]
+            return JsonResponse({"ok": False, "errors": errors}, status=400)
     else:
         form = SlotForm()
     return render(request, "jobs/slot_form.html", {"form": form})

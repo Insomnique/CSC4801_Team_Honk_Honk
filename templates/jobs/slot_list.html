@@ -1,23 +1,505 @@
 {% extends "base.html" %}
 {% block title %}My availability slots{% endblock %}
 {% block content %}
-<h1>My availability slots</h1>
-<p><a href="{% url 'jobs:slot_create' %}">+ Add a slot</a></p>
-{% if slots %}
-<table border="1" cellpadding="6">
-    <thead><tr><th>Start</th><th>End</th><th>Booked</th><th></th></tr></thead>
-    <tbody>
-    {% for slot in slots %}
-        <tr>
-            <td>{{ slot.start_time|date:"Y-m-d H:i" }}</td>
-            <td>{{ slot.end_time|date:"Y-m-d H:i" }}</td>
-            <td>{% if slot.is_booked %}Yes{% else %}No{% endif %}</td>
-            <td><a href="{% url 'jobs:slot_delete' slot.pk %}">Delete</a></td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p>No slots yet.</p>
-{% endif %}
+<style>
+    html {
+        overflow-y: hidden;
+    }
+    .dash-wrap {
+        padding: 24px;
+    }
+    .dash-greeting h1 {
+        font-size: 36px;
+        font-weight: 800;
+        letter-spacing: -1px;
+        margin: 0 0 4px 0;
+    }
+
+    .post-row {
+        margin-top: 20px;
+    }
+    .edit-btn {
+        display: inline-block;
+        font-size: 13px;
+        font-weight: 600;
+        padding: 6px 12px;
+        border-radius: 6px;
+        background: #222;
+        color: #fff;
+        text-decoration: none;
+    }
+    .edit-btn:hover { background: #000; }
+
+    /* Bigger version for the "+ Add a slot" button */
+    .edit-btn.big {
+        font-size: 16px;
+        padding: 12px 24px;
+        border-radius: 8px;
+    }
+
+    .post-card {
+        height: 678px;                          /* 734px minus the bigger button row, so the bottom lines up */
+        margin-top: 14px;
+        padding: 22px 24px;
+        box-sizing: border-box;
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+        overflow-y: auto;                       /* the table scrolls inside the card */
+    }
+
+    .post-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+    }
+    .post-table th {
+        text-align: left;
+        font-size: 13px;
+        font-weight: 600;
+        color: #888;
+        padding: 8px 12px 12px;
+        border-bottom: 1px solid #e5e5e5;
+    }
+    .post-table td {
+        padding: 14px 12px;
+        border-bottom: 1px solid #f0f0f0;
+        vertical-align: top;
+        overflow-wrap: anywhere;
+    }
+    .post-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+    .post-table td.booked-yes {
+        color: #2e7d32;     /* green */
+        font-weight: 600;
+    }
+    .post-table td.booked-no {
+        color: #d32f2f;     /* red */
+        font-weight: 600;
+    }
+    .post-table a {
+        color: #222;
+        font-weight: 600;
+        text-decoration: none;
+    }
+    .post-table a:hover {
+        color: #000;
+    }
+    .post-table a.edit-btn,
+    .post-table a.edit-btn:hover {
+        color: #fff;                            /* keeps button text white inside the table */
+    }
+    .post-table th.col-actions,
+    .post-table td.col-actions {
+        width: 1%;
+        white-space: nowrap;
+    }
+    .row-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+    }
+    .empty-note {
+        color: #999;
+        font-style: italic;
+        font-size: 14px;
+        margin: 0;
+    }
+
+    /* Add slot popup */
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.25);
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+    .modal-overlay.open { display: flex; }
+
+    .modal-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+        padding: 22px 24px;
+        box-sizing: border-box;
+        width: 420px;
+        max-width: 92vw;
+        max-height: 92vh;
+        overflow-y: auto;
+    }
+    .modal-header {
+        margin-bottom: 14px;
+    }
+    .modal-header h2 {
+        font-size: 18px;
+        font-weight: 700;
+        margin: 0;
+    }
+    .modal-field { margin-bottom: 14px; }
+    .modal-field label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 15px;
+        color: #888;
+    }
+    .modal-field input[type="datetime-local"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border: 1px solid #e5e5e5;
+        border-radius: 8px;
+        background: #faf8f5;
+        font: inherit;
+        font-size: 14px;
+        line-height: 1.5;
+    }
+    .modal-field input:focus {
+        outline: none;
+        border-color: #222;
+    }
+    .modal-note {
+        margin: 0;
+        color: #999;
+        font-size: 13px;
+        font-style: italic;
+    }
+    .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        padding-top: 16px;
+    }
+
+    /* Popup buttons reuse .edit-btn for size, font and colors */
+    .post-btn,
+    .cancel-btn {
+        border: none;
+        cursor: pointer;
+        font-family: inherit;   /* <button> doesn't inherit the page font by default */
+    }
+    .cancel-btn {
+        background: transparent;
+        color: #222;
+        border: 2px solid #222;
+        padding: 4px 10px;      /* 2px border + 4px = same size as the Edit button */
+    }
+    .cancel-btn:hover { background: #f0f0f0; }
+    .post-btn:disabled { opacity: 0.5; cursor: default; }
+
+    /* Alerts (delete + error) */
+    .alert-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.25);
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+    }
+    .alert-overlay.open { display: flex; }
+
+    .alert-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+        padding: 18px 20px;
+        box-sizing: border-box;
+        width: 340px;
+        max-width: 92vw;
+    }
+    .alert-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 14px;
+    }
+    .alert-top h3 {
+        font-size: 16px;
+        font-weight: 700;
+        margin: 0;
+    }
+    .alert-x {
+        border: none;
+        background: none;
+        font-family: inherit;
+        font-size: 22px;
+        line-height: 1;
+        color: #888;
+        cursor: pointer;
+        padding: 0 2px;
+    }
+    .alert-x:hover { color: #000; }
+    .alert-text {
+        font-size: 14px;
+        line-height: 1.5;
+        color: #333;
+        margin: 0 0 20px 0;
+        overflow-wrap: anywhere;
+    }
+    .alert-actions {
+        display: flex;
+        justify-content: flex-end;
+    }
+    .alert-ok {
+        padding: 8px 22px;
+        border: none;
+        border-radius: 6px;
+        background: #222;
+        color: #fff;
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .alert-ok:hover { background: #000; }
+    .alert-ok:disabled { opacity: 0.5; cursor: default; }
+</style>
+
+<div class="dash-wrap">
+    <div class="dash-greeting">
+        <h1>My Availability Slots</h1>
+    </div>
+
+    <div class="post-row">
+        <a href="{% url 'jobs:slot_create' %}" class="edit-btn big" id="add-slot-btn">+ Add a slot</a>
+    </div>
+
+    <div class="post-card">
+        {% if slots %}
+        <table class="post-table">
+            <thead>
+                <tr><th>Start</th><th>End</th><th>Booked</th><th class="col-actions"></th></tr>
+            </thead>
+            <tbody>
+            {% for slot in slots %}
+                <tr>
+                    <td>{{ slot.start_time|date:"Y-m-d H:i" }}</td>
+                    <td>{{ slot.end_time|date:"Y-m-d H:i" }}</td>
+                    {% if slot.is_booked %}
+                        <td class="booked-yes">Yes</td>
+                    {% else %}
+                        <td class="booked-no">No</td>
+                    {% endif %}
+                    <td class="col-actions">
+                        <div class="row-actions">
+                            <a href="{% url 'jobs:slot_delete' slot.pk %}" class="edit-btn delete-slot-btn"
+                               data-label="{{ slot.start_time|date:'Y-m-d H:i' }}–{{ slot.end_time|date:'H:i' }}"
+                               data-blocked="{% if slot.is_booked %}1{% endif %}">Delete</a>
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty-note">No slots yet.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ADD SLOT POPUP -->
+<div class="modal-overlay" id="slot-modal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="slot-modal-title">
+        <div class="modal-header">
+            <h2 id="slot-modal-title">Add Availability Slot</h2>
+        </div>
+        <form method="post" action="{% url 'jobs:slot_create' %}" id="slot-form">
+            {% csrf_token %}
+            {% for field in slot_form %}
+                <div class="modal-field">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                </div>
+            {% endfor %}
+            <p class="modal-note">Slots are exactly 30 minutes; end time is set automatically.</p>
+            <div class="modal-actions">
+                <button type="button" class="edit-btn cancel-btn" id="cancel-slot-btn">Cancel</button>
+                <button type="submit" class="edit-btn post-btn">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ERROR ALERT (shown when creating a slot fails a check) -->
+<div class="alert-overlay" id="error-alert" aria-hidden="true">
+    <div class="alert-card" role="alertdialog" aria-modal="true" aria-labelledby="error-alert-title">
+        <div class="alert-top">
+            <h3 id="error-alert-title">Can’t Create Slot</h3>
+            <button type="button" class="alert-x" id="error-alert-x" aria-label="Close">&times;</button>
+        </div>
+        <p class="alert-text" id="error-alert-text"></p>
+        <div class="alert-actions">
+            <button type="button" class="alert-ok" id="error-alert-ok">OK</button>
+        </div>
+    </div>
+</div>
+
+<!-- DELETE ALERT -->
+<div class="alert-overlay" id="delete-alert" aria-hidden="true">
+    <div class="alert-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-alert-title">
+        <div class="alert-top">
+            <h3 id="delete-alert-title"></h3>
+            <button type="button" class="alert-x" id="delete-alert-x" aria-label="Close">&times;</button>
+        </div>
+        <p class="alert-text" id="delete-alert-text"></p>
+        <div class="alert-actions">
+            <button type="button" class="alert-ok" id="delete-alert-btn"></button>
+        </div>
+    </div>
+</div>
+
+<!-- Carries the CSRF token for the delete request -->
+<form method="post" id="delete-form" hidden>{% csrf_token %}</form>
+
+<script>
+    // ---- Add slot popup ----
+    const slotModal = document.getElementById("slot-modal");
+    const slotForm = document.getElementById("slot-form");
+
+    function openSlotModal() {
+        slotForm.reset();                              // discards anything left over from a previous open
+        slotModal.classList.add("open");
+        slotModal.setAttribute("aria-hidden", "false");
+        const first = slotModal.querySelector("input");
+        if (first) first.focus();
+    }
+    function closeSlotModal() {
+        slotModal.classList.remove("open");
+        slotModal.setAttribute("aria-hidden", "true");
+    }
+
+    document.getElementById("add-slot-btn").addEventListener("click", (e) => {
+        e.preventDefault();       // stop the link from navigating
+        openSlotModal();
+    });
+    document.getElementById("cancel-slot-btn").addEventListener("click", closeSlotModal);
+    slotModal.addEventListener("click", (e) => {
+        if (e.target === slotModal) closeSlotModal();    // click on the dark background
+    });
+
+    // ---- Error alert ----
+    const errorAlert = document.getElementById("error-alert");
+
+    function showErrorAlert(message) {
+        document.getElementById("error-alert-text").textContent = message;
+        errorAlert.classList.add("open");
+        errorAlert.setAttribute("aria-hidden", "false");
+        document.getElementById("error-alert-ok").focus();
+    }
+    function closeErrorAlert() {
+        errorAlert.classList.remove("open");
+        errorAlert.setAttribute("aria-hidden", "true");
+    }
+    document.getElementById("error-alert-ok").addEventListener("click", closeErrorAlert);
+    document.getElementById("error-alert-x").addEventListener("click", closeErrorAlert);
+    errorAlert.addEventListener("click", (e) => {
+        if (e.target === errorAlert) closeErrorAlert();
+    });
+
+    // Escape closes the top-most popup first (the alert, then the form)
+    document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        if (errorAlert.classList.contains("open")) closeErrorAlert();
+        else if (slotModal.classList.contains("open")) closeSlotModal();
+    });
+
+    // Create the slot without leaving the page
+    slotForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const btn = slotForm.querySelector(".post-btn");
+        btn.disabled = true;
+        try {
+            const res = await fetch(slotForm.action, {
+                method: "POST",
+                body: new FormData(slotForm),                       // includes the CSRF token
+                headers: { "X-Requested-With": "XMLHttpRequest" },  // tells the view to answer with JSON
+                credentials: "same-origin",
+            });
+            if (res.ok) {
+                window.location.reload();                           // created: refresh the list
+            } else if (res.status === 400) {
+                const data = await res.json();
+                showErrorAlert((data.errors || []).join(" ") || "Could not create the slot.");
+            } else {
+                slotForm.submit();                                  // anything unexpected: normal submit
+            }
+        } catch (err) {
+            slotForm.submit();                                      // network problem: normal submit
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    // ---- Delete alert ----
+    const deleteAlert = document.getElementById("delete-alert");
+    const deleteBtn = document.getElementById("delete-alert-btn");
+    const deleteForm = document.getElementById("delete-form");
+    let deleteUrl = "";
+    let deleteLabel = "";
+
+    function showDeleteAlert(mode, label) {
+        const confirming = mode === "confirm";
+        document.getElementById("delete-alert-title").textContent = confirming ? "Delete Slot" : "Can’t Delete Slot";
+        document.getElementById("delete-alert-text").textContent = confirming
+            ? `Are you sure you want to delete slot “${label}”?`
+            : `Can’t delete slot “${label}” because it has been booked.`;
+        deleteBtn.textContent = confirming ? "Yes" : "OK";
+        deleteBtn.dataset.mode = mode;
+        deleteAlert.classList.add("open");
+        deleteAlert.setAttribute("aria-hidden", "false");
+        deleteBtn.focus();
+    }
+    function closeDeleteAlert() {
+        deleteAlert.classList.remove("open");
+        deleteAlert.setAttribute("aria-hidden", "true");
+    }
+
+    document.querySelectorAll(".delete-slot-btn").forEach(link => {
+        link.addEventListener("click", (e) => {
+            e.preventDefault();       // stop the link from going to the delete page
+            deleteUrl = link.getAttribute("href");
+            deleteLabel = link.dataset.label;
+            showDeleteAlert(link.dataset.blocked ? "blocked" : "confirm", deleteLabel);
+        });
+    });
+
+    deleteBtn.addEventListener("click", async () => {
+        if (deleteBtn.dataset.mode !== "confirm") {   // "OK" on the can't-delete message
+            closeDeleteAlert();
+            return;
+        }
+        deleteBtn.disabled = true;
+        try {
+            const res = await fetch(deleteUrl, {
+                method: "POST",
+                body: new FormData(deleteForm),       // includes the CSRF token
+                credentials: "same-origin",
+            });
+            if (res.status === 409) {
+                showDeleteAlert("blocked", deleteLabel);   // got booked in the meantime
+            } else if (res.ok) {
+                window.location.reload();             // deleted: refresh the list
+            } else {
+                deleteForm.action = deleteUrl;        // anything unexpected: normal submit
+                deleteForm.submit();
+            }
+        } catch (err) {
+            deleteForm.action = deleteUrl;            // network problem: normal submit
+            deleteForm.submit();
+        } finally {
+            deleteBtn.disabled = false;
+        }
+    });
+
+    document.getElementById("delete-alert-x").addEventListener("click", closeDeleteAlert);
+    deleteAlert.addEventListener("click", (e) => {
+        if (e.target === deleteAlert) closeDeleteAlert();     // click on the dark background
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeDeleteAlert();
+    });
+</script>
 {% endblock %}

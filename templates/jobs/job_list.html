@@ -573,7 +573,7 @@
 
     function showDeleteAlert(mode, title) {
         const confirming = mode === "confirm";
-        document.getElementById("delete-alert-title").textContent = confirming ? "Delete Job" : "Can’t Delete Job";
+        document.getElementById("delete-alert-title").textContent = confirming ? "Delete Post" : "Can’t Delete Post";
         document.getElementById("delete-alert-text").textContent = confirming
             ? `Are you sure you want to delete “${title}”?`
             : `“${title}” can’t be deleted because it has applicants or slots.`;

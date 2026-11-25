@@ -44,6 +44,7 @@ class SlotForm(forms.ModelForm):
         }
 
     def __init__(self, *args, **kwargs):
+        self.employer = kwargs.pop("employer", None)
         super().__init__(*args, **kwargs)
         self.fields["start_time"].input_formats = ["%Y-%m-%dT%H:%M"]
 
@@ -51,6 +52,18 @@ class SlotForm(forms.ModelForm):
         start = self.cleaned_data["start_time"]
         if start <= timezone.now():
             raise forms.ValidationError("Slot must be in the future.")
+        
+        if self.employer is not None:
+            end = start + timedelta(minutes=30)
+            overlaps = Slot.objects.filter(
+                employer=self.employer,
+                start_time__lt=end,
+                end_time__gt=start,
+            ).exists()
+            if overlaps:
+                raise forms.ValidationError(
+                    "This time overlaps with a slot you already created."
+                )
         return start
 
     def save(self, commit=True):

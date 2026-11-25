@@ -274,6 +274,17 @@ def book_slot(request, slot_pk):
     # Rule 5: application has no existing booking
     if Booking.objects.filter(application=app).exists():
         return HttpResponse("Application already has a booking.", status=409)
+    # Rule 6: slot must not overlap ANY interview this candidate already booked
+    overlaps = Booking.objects.filter(
+        application__candidate=request.user,
+        slot__start_time__lt=slot.end_time,
+        slot__end_time__gt=slot.start_time,
+    ).exists()
+    if overlaps:
+        return HttpResponse(
+            "This time overlaps with another interview you have already booked.",
+            status=409,
+        )
 
     try:
         with transaction.atomic():

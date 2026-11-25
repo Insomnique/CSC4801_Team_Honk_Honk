@@ -1,32 +1,483 @@
 {% extends "base.html" %}
 {% block title %}My applications{% endblock %}
 {% block content %}
-<h1>My applications</h1>
-{% if apps %}
-<table border="1" cellpadding="6">
-    <thead>
-        <tr><th>Job</th><th>Company</th><th>Status</th><th>Interview</th></tr>
-    </thead>
-    <tbody>
-    {% for app in apps %}
-        <tr>
-            <td><a href="{% url 'jobs:job_detail' app.job.pk %}">{{ app.job.title }}</a></td>
-            <td>{{ app.job.employer.employer_profile.company_name|default:app.job.employer.username }}</td>
-            <td>{{ app.get_status_display }}</td>
-            <td>
-                {% if app.status == "interviewing" %}
-                    {% if app.booking %}
-                        Booked: {{ app.booking.slot.start_time|date:"Y-m-d H:i" }}
-                    {% else %}
-                        <a href="{% url 'jobs:bookable_slots' app.pk %}">Book interview</a>
-                    {% endif %}
-                {% else %}—{% endif %}
-            </td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p>You haven't applied to any jobs yet.</p>
-{% endif %}
+<style>
+    html {
+        overflow-y: hidden;
+    }
+    .dash-wrap {
+        padding: 24px;
+    }
+    .dash-greeting h1 {
+        font-size: 36px;
+        font-weight: 800;
+        letter-spacing: -1px;
+        margin: 0 0 4px 0;
+    }
+
+    .apps-card {
+        --box-offset: 190px;                    /* same value as --box-offset in Recommended jobs */
+        height: 734px;
+        margin-top: 20px;
+        padding: 22px 24px;
+        box-sizing: border-box;
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+        overflow-y: auto;                       /* the table scrolls inside the card */
+    }
+
+    .apps-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+    }
+    .apps-table th {
+        text-align: left;
+        font-size: 13px;
+        font-weight: 600;
+        color: #888;
+        padding: 8px 12px 12px;
+        border-bottom: 1px solid #e5e5e5;
+    }
+    .apps-table td {
+        padding: 14px 12px;
+        border-bottom: 1px solid #f0f0f0;
+        vertical-align: top;
+        overflow-wrap: anywhere;
+    }
+    .apps-table td.status-accepted {
+        color: #2e7d32;     /* green */
+        font-weight: 600;
+    }
+    .apps-table td.status-rejected {
+        color: #d32f2f;     /* red */
+        font-weight: 600;
+    }
+    .apps-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+    .apps-table a {
+        color: #222;
+        font-weight: 600;
+        text-decoration: none;
+    }
+    .apps-table a:hover {
+        color: #000;
+    }
+    .empty-note {
+        color: #999;
+        font-style: italic;
+        font-size: 14px;
+        margin: 0;
+    }
+
+    /* Job popup (same as Recommended jobs, without the Apply button) */
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.25);
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+    .modal-overlay.open { display: flex; }
+
+    .modal-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+        padding: 22px 24px;
+        box-sizing: border-box;
+        width: 380px;
+        max-width: 92vw;
+        height: 560px;
+        max-height: 92vh;
+        display: flex;
+        flex-direction: column;
+    }
+    .modal-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 14px;
+    }
+    .modal-top > div { min-width: 0; }
+    .modal-top h2 {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+        margin: 0 0 4px 0;
+        overflow-wrap: anywhere;
+        word-break: break-word; 
+    }
+    .modal-company {
+        font-size: 14px;
+        color: #888;
+        overflow-wrap: anywhere;
+    }
+    .modal-match {
+        flex-shrink: 0;
+        font-size: 14px;
+        font-weight: 700;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #222;
+        color: #fff;
+    }
+    .modal-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding-right: 4px;
+        font-size: 14px;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+    .modal-body h3 {
+        font-size: 15px;
+        font-weight: 700;
+        margin: 0 0 6px 0;
+    }
+    .modal-body p,
+    .modal-body div {
+        max-width: 100%;
+        white-space: normal;
+    }
+    .modal-section { margin-bottom: 16px; }
+    .modal-section p { margin: 0 0 10px 0; }
+
+    /* Booking popup */
+    .book-card { height: 480px; }
+    .book-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid #f0f0f0;
+        font-size: 14px;
+    }
+    .book-row:last-child { border-bottom: none; }
+    .book-row form { margin: 0; flex-shrink: 0; }
+    .book-btn {
+        padding: 6px 16px;
+        border: none;
+        border-radius: 6px;
+        background: #222;
+        color: #fff;
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .book-btn:hover { background: #000; }
+    .book-btn:disabled { opacity: 0.5; cursor: default; }
+
+    /* Alert (same as Recommended jobs) */
+    .alert-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.25);
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+    }
+    .alert-overlay.open { display: flex; }
+    .alert-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+        padding: 18px 20px;
+        box-sizing: border-box;
+        width: 340px;
+        max-width: 92vw;
+    }
+    .alert-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 14px;
+    }
+    .alert-top h3 { font-size: 16px; font-weight: 700; margin: 0; }
+    .alert-x {
+        border: none;
+        background: none;
+        font-family: inherit;
+        font-size: 22px;
+        line-height: 1;
+        color: #888;
+        cursor: pointer;
+        padding: 0 2px;
+    }
+    .alert-x:hover { color: #000; }
+    .alert-text { font-size: 14px; line-height: 1.5; color: #333; margin: 0 0 20px 0; }
+    .alert-actions { display: flex; justify-content: flex-end; }
+    .alert-ok {
+        padding: 8px 22px;
+        border: none;
+        border-radius: 6px;
+        background: #222;
+        color: #fff;
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .alert-ok:hover { background: #000; }
+</style>
+
+<div class="dash-wrap">
+    <div class="dash-greeting">
+        <h1>My Applications</h1>
+    </div>
+
+    <div class="apps-card">
+        {% if apps %}
+        <table class="apps-table">
+            <thead>
+                <tr><th>Job</th><th>Company</th><th>Status</th><th>Interview</th></tr>
+            </thead>
+            <tbody>
+            {% for app in apps %}
+                <tr>
+                    <td><a href="{% url 'jobs:job_detail' app.job.pk %}" class="job-link" data-app="{{ app.pk }}">{{ app.job.title }}</a></td>
+                    <td>{{ app.job.employer.employer_profile.company_name|default:app.job.employer.username }}</td>
+                    <td class="status-{{ app.status }}">{{ app.get_status_display }}</td>
+                    <td>
+                        {% if app.status == "interviewing" %}
+                            {% if app.booking %}
+                                Booked: {{ app.booking.slot.start_time|date:"Y-m-d H:i" }}
+                            {% else %}
+                            <a href="{% url 'jobs:bookable_slots' app.pk %}" class="book-link" data-title="{{ app.job.title }}">Book interview</a>
+                            {% endif %}
+                        {% else %}—{% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+
+        <!-- Hidden data the popup reads when a job is clicked (outside the table so row styling is unaffected) -->
+        {% for app in apps %}
+            <div hidden id="job-data-{{ app.pk }}"
+                 data-title="{{ app.job.title }}"
+                 data-company="{{ app.job.employer.employer_profile.company_name|default:app.job.employer.username }}"
+                 data-score="{{ app.score|default:'' }}"
+                 data-skills="{% if app.job.required_skills %}{{ app.job.required_skills|join:', ' }}{% else %}(none){% endif %}">
+                <div class="job-description">{{ app.job.description|linebreaks }}</div>
+            </div>
+        {% endfor %}
+        {% else %}
+        <p class="empty-note">You haven't applied to any jobs yet.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- JOB POPUP -->
+<div class="modal-overlay" id="job-modal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="job-modal-title">
+        <div class="modal-top">
+            <div>
+                <h2 id="job-modal-title"></h2>
+                <div class="modal-company" id="job-modal-company"></div>
+            </div>
+            <span class="modal-match" id="job-modal-match"></span>
+        </div>
+
+        <div class="modal-body">
+            <div class="modal-section">
+                <h3>Required skills</h3>
+                <p id="job-modal-skills"></p>
+            </div>
+            <div class="modal-section">
+                <h3>Description</h3>
+                <div id="job-modal-description"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- BOOKING POPUP -->
+<div class="modal-overlay" id="book-modal" aria-hidden="true">
+    <div class="modal-card book-card" role="dialog" aria-modal="true" aria-labelledby="book-title">
+        <div class="modal-top">
+            <div>
+                <h2 id="book-title"></h2>
+                <div class="modal-company">Choose an interview time</div>
+            </div>
+        </div>
+        <div class="modal-body" id="book-list"></div>
+    </div>
+</div>
+
+<!-- ALERT -->
+<div class="alert-overlay" id="alert-modal" aria-hidden="true">
+    <div class="alert-card" role="alertdialog" aria-modal="true" aria-labelledby="alert-title">
+        <div class="alert-top">
+            <h3 id="alert-title">Time Conflict</h3>
+            <button type="button" class="alert-x" id="alert-x" aria-label="Close">&times;</button>
+        </div>
+        <p class="alert-text" id="alert-text"></p>
+        <div class="alert-actions">
+            <button type="button" class="alert-ok" id="alert-ok">OK</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const jobModal = document.getElementById("job-modal");
+
+    function openJobModal(pk) {
+        const data = document.getElementById("job-data-" + pk);
+        document.getElementById("job-modal-title").textContent = data.dataset.title;
+        document.getElementById("job-modal-company").textContent = data.dataset.company;
+
+        const match = document.getElementById("job-modal-match");
+        if (data.dataset.score) {
+            match.textContent = data.dataset.score + "% match";
+            match.style.display = "";
+        } else {
+            match.style.display = "none";      // no score available for this application
+        }
+
+        document.getElementById("job-modal-skills").textContent = data.dataset.skills;
+        document.getElementById("job-modal-description").innerHTML =
+            data.querySelector(".job-description").innerHTML;
+
+        document.querySelector("#job-modal .modal-body").scrollTop = 0;
+        jobModal.classList.add("open");
+        jobModal.setAttribute("aria-hidden", "false");
+    }
+    function closeJobModal() {
+        jobModal.classList.remove("open");
+        jobModal.setAttribute("aria-hidden", "true");
+    }
+
+    document.querySelectorAll(".job-link").forEach(link => {
+        link.addEventListener("click", (e) => {
+            e.preventDefault();               // stop the link from going to job_detail
+            openJobModal(link.dataset.app);
+        });
+    });
+    jobModal.addEventListener("click", (e) => {
+        if (e.target === jobModal) closeJobModal();    // click on the dark background
+    });
+
+    // ---- Alert ----
+    const alertModal = document.getElementById("alert-modal");
+    function openAlert(message) {
+        document.getElementById("alert-text").textContent = message;
+        alertModal.classList.add("open");
+        alertModal.setAttribute("aria-hidden", "false");
+        document.getElementById("alert-ok").focus();
+    }
+    function closeAlert() {
+        alertModal.classList.remove("open");
+        alertModal.setAttribute("aria-hidden", "true");
+    }
+    document.getElementById("alert-ok").addEventListener("click", closeAlert);
+    document.getElementById("alert-x").addEventListener("click", closeAlert);
+    alertModal.addEventListener("click", (e) => { if (e.target === alertModal) closeAlert(); });
+
+    // ---- Booking popup ----
+    const bookModal = document.getElementById("book-modal");
+    const bookList = document.getElementById("book-list");
+
+    function closeBookModal() {
+        bookModal.classList.remove("open");
+        bookModal.setAttribute("aria-hidden", "true");
+    }
+
+    async function openBookModal(url, jobTitle) {
+        document.getElementById("book-title").textContent = jobTitle;
+        bookList.innerHTML = '<p class="empty-note">Loading…</p>';
+        bookModal.classList.add("open");
+        bookModal.setAttribute("aria-hidden", "false");
+
+        try {
+            const res = await fetch(url, { credentials: "same-origin" });
+            const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+            const items = doc.querySelectorAll(".app-main li");
+
+            bookList.innerHTML = "";
+            if (!items.length) {
+                const msg = doc.body.textContent.includes("already have a booking")
+                    ? "You already have a booking for this application."
+                    : "No available slots for this job right now.";
+                bookList.innerHTML = '<p class="empty-note">' + msg + "</p>";
+                return;
+            }
+
+            items.forEach(li => {
+                const sourceForm = li.querySelector("form");
+                const label = Array.from(li.childNodes)
+                    .filter(n => n.nodeType === Node.TEXT_NODE)
+                    .map(n => n.textContent).join(" ").replace(/\s+/g, " ").trim();
+
+                const row = document.createElement("div");
+                row.className = "book-row";
+                const span = document.createElement("span");
+                span.textContent = label;
+                row.appendChild(span);
+
+                const form = document.importNode(sourceForm, true);
+                form.removeAttribute("style");
+                const btn = form.querySelector("button");
+                btn.className = "book-btn";
+                form.addEventListener("submit", (e) => submitBooking(e, form));
+                row.appendChild(form);
+
+                bookList.appendChild(row);
+            });
+        } catch (err) {
+            bookList.innerHTML = '<p class="empty-note">Could not load time slots.</p>';
+        }
+    }
+
+    async function submitBooking(e, form) {
+        e.preventDefault();
+        const btn = form.querySelector("button");
+        btn.disabled = true;
+        try {
+            const res = await fetch(form.action, {
+                method: "POST",
+                body: new FormData(form),            // includes the CSRF token and application_pk
+                credentials: "same-origin",
+            });
+            if (res.status === 409) {
+                const text = (await res.text()).trim();
+                openAlert(text || "This time overlaps with another interview you have booked.");
+                btn.disabled = false;
+            } else if (res.redirected) {
+                window.location.href = res.url;
+            } else {
+                window.location.reload();
+            }
+        } catch (err) {
+            form.submit();                           // network problem: normal submit
+        }
+    }
+
+    document.querySelectorAll(".book-link").forEach(link => {
+        link.addEventListener("click", (e) => {
+            e.preventDefault();
+            openBookModal(link.href, link.dataset.title);
+        });
+    });
+    bookModal.addEventListener("click", (e) => { if (e.target === bookModal) closeBookModal(); });
+
+    // ---- Escape: closes the top-most popup first ----
+    document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        if (alertModal.classList.contains("open")) closeAlert();
+        else if (bookModal.classList.contains("open")) closeBookModal();
+        else closeJobModal();
+    });
+</script>
 {% endblock %}

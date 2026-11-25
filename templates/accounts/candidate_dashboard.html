@@ -145,6 +145,21 @@
     }
     .empty-note { color: #999; font-style: italic; font-size: 14px; margin: 0; }
 
+    /* Calendar interview rows: time stays on one line, company · job wraps on the right */
+    #cal-info-body .mini-list li {
+        align-items: flex-start;
+    }
+    #cal-info-body .mini-title {
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    #cal-info-body .mini-meta {
+        flex-shrink: 1;
+        min-width: 0;
+        text-align: right;
+        overflow-wrap: anywhere;
+    }
+
     /* Calendar */
     .cal-layout {
         display: grid;
@@ -506,7 +521,7 @@
             : new Date(iso + "T00:00:00").toLocaleDateString("en-US", {
                   weekday: "long", month: "long", day: "numeric"
               });
-        const items = interviewsFor(iso);
+        const items = interviewsFor(iso).sort((a, b) => a.time.localeCompare(b.time));
         if (!items.length) {
             infoBody.innerHTML = `<p class="empty-note">No interviews on this day.</p>`;
             return;

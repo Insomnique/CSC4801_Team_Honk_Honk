@@ -1,20 +1,432 @@
 {% extends "base.html" %}
 {% block title %}Job recommendations{% endblock %}
 {% block content %}
-<h1>Recommended jobs</h1>
-{% if scored %}
-    <ul>
-    {% for score, job in scored %}
-        <li>
-            <strong><a href="{% url 'jobs:job_detail' job.pk %}">{{ job.title }}</a></strong>
-            — {{ job.employer.employer_profile.company_name|default:job.employer.username }}
-            — <strong>Match: {{ score }}%</strong><br>
-            Required skills:
-            {% if job.required_skills %}{{ job.required_skills|join:", " }}{% else %}(none){% endif %}
-        </li>
-    {% endfor %}
-    </ul>
-{% else %}
-    <p>No jobs posted yet.</p>
-{% endif %}
+<style>
+    html {
+        overflow-y: hidden;
+    }
+    .dash-wrap {
+        padding: 24px;
+    }
+    .dash-greeting h1 {
+        font-size: 36px;
+        font-weight: 800;
+        letter-spacing: -1px;
+        margin: 0 0 4px 0;
+    }
+
+    /* The invisible scrollable box. Adjust it here. */
+    .jobs-box {
+        --box-offset: 190px;                    /* space above the box; raise it for a shorter box */
+        height: 734px;
+        margin-top: 20px;
+        padding: 6px;                           /* keeps card shadows from being clipped */
+        box-sizing: border-box;
+        overflow-y: auto;
+    }
+
+    /* Cards fill each row left to right, then wrap to the next row */
+    .jobs-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 20px;
+    }
+
+    .job-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+        padding: 22px 24px;
+        box-sizing: border-box;
+        height: 200px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        text-decoration: none;
+        color: inherit;
+        cursor: pointer;
+        overflow: hidden;
+        transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    .job-card > * {
+        flex-shrink: 0;                /* company, title and match never get squeezed */
+    }
+    .job-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    }
+    .job-head {
+        max-height: 64px;              /* room for company + 2 title lines; longer than that scrolls */
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding-right: 4px;
+        scrollbar-width: thin;
+    }
+    .job-company {
+        display: block;
+        font-size: 13px;
+        color: #888;
+        overflow-wrap: anywhere;
+    }
+    .job-title {
+        font-size: 18px;
+        font-weight: 700;
+        margin: 0;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+    .job-match {
+        font-size: 14px;
+        font-weight: 700;
+    }
+    .job-skills {
+        flex: 1 1 auto;                /* takes the remaining space in the card */
+        min-height: 0;                 /* lets it shrink so it can scroll */
+        overflow-y: auto;              /* long skills lists scroll inside the card */
+        overflow-wrap: anywhere;
+        font-size: 13px;
+        color: #666;
+        line-height: 1.5;
+    }
+    .empty-note {
+        color: #999;
+        font-style: italic;
+        font-size: 14px;
+        margin: 0;
+    }
+
+    /* Already-applied alert */
+    .alert-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.25);
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;               /* above the job popup */
+    }
+    .alert-overlay.open { display: flex; }
+
+    .alert-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+        padding: 18px 20px;
+        box-sizing: border-box;
+        width: 340px;
+        max-width: 92vw;
+    }
+    .alert-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 14px;
+    }
+    .alert-top h3 {
+        font-size: 16px;
+        font-weight: 700;
+        margin: 0;
+    }
+    .alert-x {
+        border: none;
+        background: none;
+        font-family: inherit;
+        font-size: 22px;
+        line-height: 1;
+        color: #888;
+        cursor: pointer;
+        padding: 0 2px;
+    }
+    .alert-x:hover { color: #000; }
+    .alert-text {
+        font-size: 14px;
+        line-height: 1.5;
+        color: #333;
+        margin: 0 0 20px 0;
+    }
+    .alert-actions {
+        display: flex;
+        justify-content: flex-end;
+    }
+    .alert-ok {
+        padding: 8px 22px;
+        border: none;
+        border-radius: 6px;
+        background: #222;
+        color: #fff;
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .alert-ok:hover { background: #000; }
+
+    /* Job popup */
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.25);
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+    .modal-overlay.open { display: flex; }
+
+    .modal-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+        padding: 22px 24px;
+        box-sizing: border-box;
+        width: 380px;
+        max-width: 92vw;
+        height: 560px;
+        max-height: 92vh;
+        display: flex;
+        flex-direction: column;
+    }
+    .modal-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 14px;
+    }
+    .modal-top > div { min-width: 0; }
+    .modal-top h2 {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+        margin: 0 0 4px 0;
+        overflow-wrap: anywhere;
+        word-break: break-word; 
+    }
+    .modal-company {
+        font-size: 14px;
+        color: #888;
+        overflow-wrap: anywhere;
+    }
+    .modal-match {
+        flex-shrink: 0;
+        font-size: 14px;
+        font-weight: 700;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #222;
+        color: #fff;
+    }
+    .modal-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;              /* scroll down */
+        overflow-x: hidden;            /* never scroll sideways */
+        padding-right: 4px;
+        font-size: 14px;
+        line-height: 1.5;
+        overflow-wrap: anywhere;       /* long unbroken text wraps instead of stretching sideways */
+        word-break: break-word;
+    }
+    .modal-body p,
+    .modal-body div {
+        max-width: 100%;
+        white-space: normal;
+    }
+    .modal-body h3 {
+        font-size: 15px;
+        font-weight: 700;
+        margin: 0 0 6px 0;
+    }
+    .modal-section { margin-bottom: 16px; }
+    .modal-section p { margin: 0 0 10px 0; }
+
+    .modal-actions {
+        padding-top: 16px;         /* Apply button is pinned at the very bottom */
+    }
+    .apply-btn {
+        width: 100%;
+        padding: 12px 20px;
+        border: none;
+        border-radius: 6px;
+        background: #222;
+        color: #fff;
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .apply-btn:hover { background: #000; }
+</style>
+
+<div class="dash-wrap">
+    <div class="dash-greeting">
+        <h1>Browse Jobs</h1>
+    </div>
+
+    <div class="jobs-box">
+        {% if scored %}
+            <div class="jobs-grid">
+                {% for score, job in scored %}
+                    <a href="{% url 'jobs:job_detail' job.pk %}" class="job-card" data-job="{{ job.pk }}">
+                        <div class="job-head">
+                            <span class="job-company">{{ job.employer.employer_profile.company_name|default:job.employer.username }}</span>
+                            <h2 class="job-title">{{ job.title }}</h2>
+                        </div>
+                        <span class="job-match">Match: {{ score }}%</span>
+                        <span class="job-skills">
+                            Required skills:<br>
+                            {% if job.required_skills %}{{ job.required_skills|join:", " }}{% else %}(none){% endif %}
+                        </span>
+                    </a>
+
+                    <!-- Hidden data the popup reads when this card is clicked -->
+                    <div hidden id="job-data-{{ job.pk }}"
+                         data-title="{{ job.title }}"
+                         data-company="{{ job.employer.employer_profile.company_name|default:job.employer.username }}"
+                         data-score="{{ score }}"
+                         data-skills="{% if job.required_skills %}{{ job.required_skills|join:', ' }}{% else %}(none){% endif %}"
+                         data-apply-url="{% url 'jobs:apply_to_job' job.pk %}">
+                        <div class="job-description">{{ job.description|linebreaks }}</div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="empty-note">No jobs posted yet.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- JOB POPUP -->
+<div class="modal-overlay" id="job-modal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="job-modal-title">
+        <div class="modal-top">
+            <div>
+                <h2 id="job-modal-title"></h2>
+                <div class="modal-company" id="job-modal-company"></div>
+            </div>
+            <span class="modal-match" id="job-modal-match"></span>
+        </div>
+
+        <div class="modal-body">
+            <div class="modal-section">
+                <h3>Required skills</h3>
+                <p id="job-modal-skills"></p>
+            </div>
+            <div class="modal-section">
+                <h3>Description</h3>
+                <div id="job-modal-description"></div>
+            </div>
+        </div>
+
+        {% if user.role == "candidate" %}
+        <form method="post" id="job-modal-form" class="modal-actions">
+            {% csrf_token %}
+            <button type="submit" class="apply-btn">Apply</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ALREADY APPLIED ALERT -->
+<div class="alert-overlay" id="alert-modal" aria-hidden="true">
+    <div class="alert-card" role="alertdialog" aria-modal="true" aria-labelledby="alert-title">
+        <div class="alert-top">
+            <h3 id="alert-title">Already Applied</h3>
+            <button type="button" class="alert-x" id="alert-x" aria-label="Close">&times;</button>
+        </div>
+        <p class="alert-text">You have already applied to this job.</p>
+        <div class="alert-actions">
+            <button type="button" class="alert-ok" id="alert-ok">OK</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const jobModal = document.getElementById("job-modal");
+
+    function openJobModal(pk) {
+        const data = document.getElementById("job-data-" + pk);
+        document.getElementById("job-modal-title").textContent = data.dataset.title;
+        document.getElementById("job-modal-company").textContent = data.dataset.company;
+        document.getElementById("job-modal-match").textContent = data.dataset.score + "% match";
+        document.getElementById("job-modal-skills").textContent = data.dataset.skills;
+        document.getElementById("job-modal-description").innerHTML =
+            data.querySelector(".job-description").innerHTML;
+
+        const form = document.getElementById("job-modal-form");
+        if (form) form.action = data.dataset.applyUrl;
+
+        document.querySelector("#job-modal .modal-body").scrollTop = 0;
+        jobModal.classList.add("open");
+        jobModal.setAttribute("aria-hidden", "false");
+    }
+    function closeJobModal() {
+        jobModal.classList.remove("open");
+        jobModal.setAttribute("aria-hidden", "true");
+    }
+
+    document.querySelectorAll(".job-card").forEach(card => {
+        card.addEventListener("click", (e) => {
+            e.preventDefault();            // stop the link from going to job_detail
+            openJobModal(card.dataset.job);
+        });
+    });
+    jobModal.addEventListener("click", (e) => {
+        if (e.target === jobModal) closeJobModal();    // click on the dark background
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeJobModal();
+    });
+
+    // Apply without leaving the page
+    const alertModal = document.getElementById("alert-modal");
+
+    function openAlert() {
+        alertModal.classList.add("open");
+        alertModal.setAttribute("aria-hidden", "false");
+        document.getElementById("alert-ok").focus();
+    }
+    function closeAlert() {
+        alertModal.classList.remove("open");
+        alertModal.setAttribute("aria-hidden", "true");
+    }
+
+    const applyForm = document.getElementById("job-modal-form");
+    if (applyForm) {
+        applyForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const btn = applyForm.querySelector("button[type='submit']");
+            btn.disabled = true;
+            try {
+                const response = await fetch(applyForm.action, {
+                    method: "POST",
+                    body: new FormData(applyForm),   // includes the CSRF token
+                    credentials: "same-origin",
+                });
+                if (response.redirected) {
+                    window.location.href = response.url;   // new application: go to My Applications
+                } else {
+                    openAlert();                           // already applied: show the popup
+                }
+            } catch (err) {
+                applyForm.submit();                        // network problem: fall back to normal submit
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    }
+
+    document.getElementById("alert-ok").addEventListener("click", closeAlert);
+    document.getElementById("alert-x").addEventListener("click", closeAlert);
+    alertModal.addEventListener("click", (e) => {
+        if (e.target === alertModal) closeAlert();
+    });
+
+    document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        if (alertModal.classList.contains("open")) closeAlert();
+        else closeJobModal();
+    });
+</script>
 {% endblock %}

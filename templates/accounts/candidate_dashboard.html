@@ -606,6 +606,7 @@
 
     function openProfileModal() {
         // match the width of the profile card on the page
+        profileModal.querySelector("form").reset();
         profileModal.querySelector(".modal-card").style.width = profileCard.offsetWidth + "px";
         profileModal.classList.add("open");
         profileModal.setAttribute("aria-hidden", "false");

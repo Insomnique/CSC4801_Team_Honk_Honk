@@ -20,7 +20,7 @@ class JobForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if self.instance and isinstance(self.instance.required_skills, list):
-            self.fields["required_skills"].initial = ", ".join(self.instance.required_skills)
+            self.initial["required_skills"] = ", ".join(self.instance.required_skills)
 
     def clean_required_skills(self):
         raw = self.cleaned_data.get("required_skills") or ""

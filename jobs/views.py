@@ -27,7 +27,7 @@ def job_list(request):
     if denied:
         return denied
     jobs = Job.objects.filter(employer=request.user, is_deleted=False)
-    return render(request, "jobs/job_list.html", {"jobs": jobs})
+    return render(request, "jobs/job_list.html", {"jobs": jobs, "job_form": JobForm()})
 
 
 @login_required
@@ -165,7 +165,12 @@ def job_applicants(request, pk):
         )
     )
 
-    return render(request, "jobs/job_applicants.html", {"job": job, "scored": scored})
+    template = (
+        "jobs/_applicants_table.html"
+        if request.headers.get("x-requested-with") == "XMLHttpRequest"
+        else "jobs/job_applicants.html"
+    )
+    return render(request, template, {"job": job, "scored": scored})
 
 
 @login_required

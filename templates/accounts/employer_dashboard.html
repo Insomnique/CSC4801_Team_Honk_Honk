@@ -174,9 +174,6 @@
     .jobs-list .mini-skills {
         flex: 1 1 0;
         min-width: 0;
-        max-height: 40px;          /* about two lines; longer lists scroll */
-        overflow-y: auto;
-        overflow-x: hidden;
         text-align: right;
         color: #888;
         font-size: 13px;
@@ -587,6 +584,7 @@
     const profileCard = document.querySelector(".dash-card.profile");
 
     function openProfileModal() {
+        profileModal.querySelector("form").reset();
         profileModal.querySelector(".modal-card").style.width = profileCard.offsetWidth + "px";
         profileModal.classList.add("open");
         profileModal.setAttribute("aria-hidden", "false");

@@ -1,0 +1,49 @@
+{% if scored %}
+<table class="appl-table">
+    <thead>
+        <tr>
+            <th>Candidate</th>
+            <th>Skills</th>
+            <th>Match</th>
+            <th>Status</th>
+            <th class="col-update">Update</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for score, app in scored %}
+        <tr>
+            <td>
+                <strong>
+                {% if app.candidate.candidate_profile.display_name %}
+                    {{ app.candidate.candidate_profile.display_name }}
+                {% else %}
+                    {{ app.candidate.username }}
+                {% endif %}
+                </strong>
+            </td>
+            <td>
+                {% if app.candidate.candidate_profile.skills %}
+                    {{ app.candidate.candidate_profile.skills|join:", " }}
+                {% else %}—{% endif %}
+            </td>
+            <td>{{ score }}%</td>
+            <td>{{ app.get_status_display }}</td>
+            <td class="col-update">
+                <form method="post" action="{% url 'jobs:update_application_status' app.pk %}" class="appl-form">
+                    {% csrf_token %}
+                    <select name="status">
+                        <option value="pending" {% if app.status == "pending" %}selected{% endif %}>Pending</option>
+                        <option value="interviewing" {% if app.status == "interviewing" %}selected{% endif %}>Interviewing</option>
+                        <option value="rejected" {% if app.status == "rejected" %}selected{% endif %}>Rejected</option>
+                        <option value="accepted" {% if app.status == "accepted" %}selected{% endif %}>Accepted</option>
+                    </select>
+                    <button type="submit" class="edit-btn appl-update">Update</button>
+                </form>
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty-note">No applicants yet.</p>
+{% endif %}

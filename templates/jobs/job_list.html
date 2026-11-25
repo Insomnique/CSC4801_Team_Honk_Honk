@@ -1,22 +1,636 @@
 {% extends "base.html" %}
 {% block title %}My jobs{% endblock %}
 {% block content %}
-<h1>My job postings</h1>
-<p><a href="{% url 'jobs:job_create' %}">+ Post a new job</a></p>
-{% if jobs %}
-    <ul>
-    {% for job in jobs %}
-        <li>
-            <strong>{{ job.title }}</strong>
-            — required: {% if job.required_skills %}{{ job.required_skills|join:", " }}{% else %}(none){% endif %}
-            | <a href="{% url 'jobs:job_applicants' job.pk %}">Applicants</a>
-            | <a href="{% url 'jobs:job_edit' job.pk %}">Edit</a>
-            | <a href="{% url 'jobs:job_delete' job.pk %}">Delete</a>
-            
-        </li>
-    {% endfor %}
-    </ul>
-{% else %}
-    <p>No jobs yet.</p>
-{% endif %}
+<style>
+    html {
+        overflow-y: hidden;
+    }
+    .dash-wrap {
+        padding: 24px;
+    }
+    .dash-greeting h1 {
+        font-size: 36px;
+        font-weight: 800;
+        letter-spacing: -1px;
+        margin: 0 0 4px 0;
+    }
+
+    .post-row {
+        margin-top: 20px;
+    }
+    .edit-btn {
+        display: inline-block;
+        font-size: 13px;
+        font-weight: 600;
+        padding: 6px 12px;
+        border-radius: 6px;
+        background: #222;
+        color: #fff;
+        text-decoration: none;
+    }
+    .edit-btn:hover { background: #000; }
+
+    /* Bigger version for the "+ Post a new job" button */
+    .edit-btn.big {
+        font-size: 16px;
+        padding: 12px 24px;
+        border-radius: 8px;
+    }
+
+    .post-card {
+        height: 678px;                          /* 734px minus the bigger button row, so the bottom lines up */
+        margin-top: 14px;
+        padding: 22px 24px;
+        box-sizing: border-box;
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+        overflow-y: auto;                       /* the table scrolls inside the card */
+    }
+
+    .post-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+    }
+    .post-table th {
+        text-align: left;
+        font-size: 13px;
+        font-weight: 600;
+        color: #888;
+        padding: 8px 12px 12px;
+        border-bottom: 1px solid #e5e5e5;
+    }
+    .post-table td {
+        padding: 14px 12px;
+        border-bottom: 1px solid #f0f0f0;
+        vertical-align: top;
+        overflow-wrap: anywhere;
+    }
+    .post-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+    .post-table a {
+        color: #222;
+        font-weight: 600;
+        text-decoration: none;
+    }
+    .post-table a:hover {
+        color: #000;
+    }
+    .post-table a.edit-btn,
+    .post-table a.edit-btn:hover {
+        color: #fff;                            /* keeps button text white inside the table */
+    }
+    .post-table th.col-actions,
+    .post-table td.col-actions {
+        width: 1%;
+        white-space: nowrap;
+    }
+    .row-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+    }
+    .empty-note {
+        color: #999;
+        font-style: italic;
+        font-size: 14px;
+        margin: 0;
+    }
+
+    /* Create / edit job popup */
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.25);
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+    .modal-overlay.open { display: flex; }
+
+    .modal-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+        padding: 22px 24px;
+        box-sizing: border-box;
+        width: 520px;
+        max-width: 92vw;
+        height: 600px;
+        max-height: 92vh;
+        display: flex;
+        flex-direction: column;
+    }
+    .modal-header {
+        margin-bottom: 14px;
+    }
+    .modal-header h2 {
+        font-size: 18px;
+        font-weight: 700;
+        margin: 0;
+    }
+    .modal-form {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+    }
+    .modal-fields {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding-right: 4px;
+    }
+    .modal-field { margin-bottom: 14px; }
+    .modal-field label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 15px;
+        color: #888;
+    }
+    .modal-field input[type="text"],
+    .modal-field input[type="email"],
+    .modal-field input[type="number"],
+    .modal-field select,
+    .modal-field textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border: 1px solid #e5e5e5;
+        border-radius: 8px;
+        background: #faf8f5;
+        font: inherit;
+        font-size: 14px;
+        line-height: 1.5;
+    }
+    /* Fixed-size boxes that scroll on their own */
+    .modal-field textarea {
+        height: 90px;                /* required skills */
+        overflow-y: auto;
+        resize: none;
+    }
+    .modal-field textarea[name="description"] {
+        height: 190px;
+    }
+    .modal-field input:focus,
+    .modal-field select:focus,
+    .modal-field textarea:focus {
+        outline: none;
+        border-color: #222;
+    }
+    .modal-field small { display: block; margin-top: 4px; color: #999; font-size: 12px; }
+    .modal-field small.field-error { color: #c0392b; }
+
+    .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        padding-top: 16px;
+    }
+
+    /* Popup buttons reuse .edit-btn for size, font and colors */
+    .post-btn,
+    .cancel-btn {
+        border: none;
+        cursor: pointer;
+        font-family: inherit;   /* <button> doesn't inherit the page font by default */
+    }
+    .cancel-btn {
+        background: transparent;
+        color: #222;
+        border: 2px solid #222;
+        padding: 4px 10px;      /* 2px border + 4px = same size as the Edit button */
+    }
+    .cancel-btn:hover { background: #f0f0f0; }
+
+    /* Applicants popup */
+    .modal-card.appl-card {
+        width: 820px;
+        height: 560px;
+    }
+    .appl-card .modal-header h2 {
+        overflow-wrap: anywhere;
+    }
+    .appl-msg {
+        color: #c0392b;
+        font-size: 13px;
+        margin-bottom: 8px;
+    }
+    .appl-msg:empty { display: none; }
+    .appl-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;              /* the table scrolls inside the popup */
+        overflow-x: auto;
+        padding-right: 4px;
+    }
+    .appl-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+    }
+    .appl-table th {
+        text-align: left;
+        font-size: 13px;
+        font-weight: 600;
+        color: #888;
+        padding: 8px 12px 12px;
+        border-bottom: 1px solid #e5e5e5;
+    }
+    .appl-table td {
+        padding: 14px 12px;
+        border-bottom: 1px solid #f0f0f0;
+        vertical-align: top;
+        overflow-wrap: anywhere;
+    }
+    .appl-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+    .appl-table th.col-update,
+    .appl-table td.col-update {
+        width: 1%;
+        white-space: nowrap;
+    }
+    .appl-form {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+    }
+    .appl-form select {
+        padding: 5px 8px;
+        border: 1px solid #e5e5e5;
+        border-radius: 6px;
+        background: #faf8f5;
+        font: inherit;
+        font-size: 13px;
+    }
+    .appl-update {
+        border: none;
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .appl-update:disabled { opacity: 0.5; cursor: default; }
+
+    /* Delete alert */
+    .alert-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.25);
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+    }
+    .alert-overlay.open { display: flex; }
+
+    .alert-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+        padding: 18px 20px;
+        box-sizing: border-box;
+        width: 340px;
+        max-width: 92vw;
+    }
+    .alert-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 14px;
+    }
+    .alert-top h3 {
+        font-size: 16px;
+        font-weight: 700;
+        margin: 0;
+    }
+    .alert-x {
+        border: none;
+        background: none;
+        font-family: inherit;
+        font-size: 22px;
+        line-height: 1;
+        color: #888;
+        cursor: pointer;
+        padding: 0 2px;
+    }
+    .alert-x:hover { color: #000; }
+    .alert-text {
+        font-size: 14px;
+        line-height: 1.5;
+        color: #333;
+        margin: 0 0 20px 0;
+        overflow-wrap: anywhere;
+    }
+    .alert-actions {
+        display: flex;
+        justify-content: flex-end;
+    }
+    .alert-ok {
+        padding: 8px 22px;
+        border: none;
+        border-radius: 6px;
+        background: #222;
+        color: #fff;
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .alert-ok:hover { background: #000; }
+    .alert-ok:disabled { opacity: 0.5; cursor: default; }
+</style>
+
+<div class="dash-wrap">
+    <div class="dash-greeting">
+        <h1>My Job Postings</h1>
+    </div>
+
+    <div class="post-row">
+        <a href="{% url 'jobs:job_create' %}" class="edit-btn big" id="post-job-btn">+ Post a new job</a>
+    </div>
+
+    <div class="post-card">
+        {% if jobs %}
+        <table class="post-table">
+            <thead>
+                <tr><th>Job</th><th>Required Skills</th><th>Applicants</th><th class="col-actions"></th></tr>
+            </thead>
+            <tbody>
+            {% for job in jobs %}
+                <tr>
+                    <td><strong>{{ job.title }}</strong></td>
+                    <td>{% if job.required_skills %}{{ job.required_skills|join:", " }}{% else %}(none){% endif %}</td>
+                    <td><a href="{% url 'jobs:job_applicants' job.pk %}" class="view-applicants-link" data-title="{{ job.title }}">View</a></td>
+                    <td class="col-actions">
+                        <div class="row-actions">
+                            <a href="{% url 'jobs:job_edit' job.pk %}" class="edit-btn edit-job-btn"
+                               data-title="{{ job.title }}"
+                               data-description="{{ job.description }}"
+                               data-skills="{% if job.required_skills %}{{ job.required_skills|join:', ' }}{% endif %}">Edit</a>
+                            <a href="{% url 'jobs:job_delete' job.pk %}" class="edit-btn delete-job-btn"
+                               data-title="{{ job.title }}"
+                               data-blocked="{% if job.has_dependents %}1{% endif %}">Delete</a>
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty-note">No jobs yet.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- CREATE / EDIT JOB POPUP -->
+<div class="modal-overlay" id="job-create-modal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="job-create-title">
+        <div class="modal-header">
+            <h2 id="job-create-title">Create Job Post</h2>
+        </div>
+        <form method="post" action="{% url 'jobs:job_create' %}" class="modal-form">
+            {% csrf_token %}
+            <div class="modal-fields">
+                {% for field in job_form %}
+                    <div class="modal-field">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                        {% for error in field.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+                    </div>
+                {% endfor %}
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="edit-btn cancel-btn" id="cancel-job-btn">Cancel</button>
+                <button type="submit" class="edit-btn post-btn">Post</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- APPLICANTS POPUP -->
+<div class="modal-overlay" id="appl-modal" aria-hidden="true">
+    <div class="modal-card appl-card" role="dialog" aria-modal="true" aria-labelledby="appl-title">
+        <div class="modal-header">
+            <h2 id="appl-title"></h2>
+        </div>
+        <div class="appl-msg" id="appl-msg"></div>
+        <div class="appl-body" id="appl-body"></div>
+    </div>
+</div>
+
+<!-- DELETE ALERT -->
+<div class="alert-overlay" id="delete-alert" aria-hidden="true">
+    <div class="alert-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-alert-title">
+        <div class="alert-top">
+            <h3 id="delete-alert-title"></h3>
+            <button type="button" class="alert-x" id="delete-alert-x" aria-label="Close">&times;</button>
+        </div>
+        <p class="alert-text" id="delete-alert-text"></p>
+        <div class="alert-actions">
+            <button type="button" class="alert-ok" id="delete-alert-btn"></button>
+        </div>
+    </div>
+</div>
+
+<!-- Carries the CSRF token for the delete request -->
+<form method="post" id="delete-form" hidden>{% csrf_token %}</form>
+
+<script>
+    const jobCreateModal = document.getElementById("job-create-modal");
+    const jobForm = jobCreateModal.querySelector("form");
+    const jobModalTitle = document.getElementById("job-create-title");
+    const jobSubmitBtn = jobCreateModal.querySelector(".post-btn");
+    const createUrl = jobForm.getAttribute("action");
+
+    function setField(name, value) {
+        const el = jobForm.elements.namedItem(name);
+        if (el) el.value = value || "";
+    }
+
+    function openJobModal(mode, link) {
+        jobForm.reset();                              // clears anything left over from a previous open
+
+        if (mode === "edit") {
+            jobModalTitle.textContent = "Edit Job Post";
+            jobSubmitBtn.textContent = "Save";
+            jobForm.setAttribute("action", link.getAttribute("href"));   // this job's edit URL
+            setField("title", link.dataset.title);
+            setField("description", link.dataset.description);
+            setField("required_skills", link.dataset.skills);
+        } else {
+            jobModalTitle.textContent = "Create Job Post";
+            jobSubmitBtn.textContent = "Post";
+            jobForm.setAttribute("action", createUrl);
+        }
+
+        jobCreateModal.classList.add("open");
+        jobCreateModal.setAttribute("aria-hidden", "false");
+        const first = jobCreateModal.querySelector("input, textarea, select");
+        if (first) first.focus();
+    }
+    function closeJobCreateModal() {
+        jobCreateModal.classList.remove("open");
+        jobCreateModal.setAttribute("aria-hidden", "true");
+    }
+
+    document.getElementById("post-job-btn").addEventListener("click", (e) => {
+        e.preventDefault();       // stop the link from navigating
+        openJobModal("create");
+    });
+    document.querySelectorAll(".edit-job-btn").forEach(link => {
+        link.addEventListener("click", (e) => {
+            e.preventDefault();   // stop the link from navigating
+            openJobModal("edit", link);
+        });
+    });
+    document.getElementById("cancel-job-btn").addEventListener("click", closeJobCreateModal);
+    jobCreateModal.addEventListener("click", (e) => {
+        if (e.target === jobCreateModal) closeJobCreateModal();   // click on the dark background
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeJobCreateModal();
+    });
+
+    // ---- Applicants popup ----
+    const applModal = document.getElementById("appl-modal");
+    const applBody = document.getElementById("appl-body");
+    const applMsg = document.getElementById("appl-msg");
+    let applUrl = "";
+
+    async function loadApplicants(keepScroll) {
+        const top = applBody.scrollTop;
+        try {
+            const res = await fetch(applUrl, {
+                headers: { "X-Requested-With": "XMLHttpRequest" },   // tells the view to send only the table
+                credentials: "same-origin",
+            });
+            if (!res.ok) throw new Error("bad response");
+            applBody.innerHTML = await res.text();
+            applBody.scrollTop = keepScroll ? top : 0;
+        } catch (err) {
+            applBody.innerHTML = '<p class="empty-note">Could not load applicants.</p>';
+        }
+    }
+
+    function openApplModal(link) {
+        applUrl = link.getAttribute("href");
+        document.getElementById("appl-title").textContent = "Applicants for “" + link.dataset.title + "”";
+        applMsg.textContent = "";
+        applBody.innerHTML = '<p class="empty-note">Loading…</p>';
+        applModal.classList.add("open");
+        applModal.setAttribute("aria-hidden", "false");
+        loadApplicants(false);
+    }
+    function closeApplModal() {
+        applModal.classList.remove("open");
+        applModal.setAttribute("aria-hidden", "true");
+    }
+
+    document.querySelectorAll(".view-applicants-link").forEach(link => {
+        link.addEventListener("click", (e) => {
+            e.preventDefault();   // stop the link from going to the applicants page
+            openApplModal(link);
+        });
+    });
+    applModal.addEventListener("click", (e) => {
+        if (e.target === applModal) closeApplModal();             // click on the dark background
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeApplModal();
+    });
+
+    // Update a status without leaving the popup
+    applBody.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const btn = form.querySelector("button[type='submit']");
+        btn.disabled = true;
+        try {
+            const res = await fetch(form.action, {
+                method: "POST",
+                body: new FormData(form),                          // includes the CSRF token
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                credentials: "same-origin",
+            });
+            applMsg.textContent = res.ok ? "" : "Could not update the status.";
+        } catch (err) {
+            applMsg.textContent = "Could not update the status.";
+        }
+        await loadApplicants(true);                                // refresh the table, keep the scroll position
+    });
+
+    // ---- Delete alert ----
+    const deleteAlert = document.getElementById("delete-alert");
+    const deleteBtn = document.getElementById("delete-alert-btn");
+    const deleteForm = document.getElementById("delete-form");
+    let deleteUrl = "";
+    let deleteTitle = "";
+
+    function showDeleteAlert(mode, title) {
+        const confirming = mode === "confirm";
+        document.getElementById("delete-alert-title").textContent = confirming ? "Delete Job" : "Can’t Delete Job";
+        document.getElementById("delete-alert-text").textContent = confirming
+            ? `Are you sure you want to delete “${title}”?`
+            : `“${title}” can’t be deleted because it has applicants or slots.`;
+        deleteBtn.textContent = confirming ? "Yes" : "OK";
+        deleteBtn.dataset.mode = mode;
+        deleteAlert.classList.add("open");
+        deleteAlert.setAttribute("aria-hidden", "false");
+        deleteBtn.focus();
+    }
+    function closeDeleteAlert() {
+        deleteAlert.classList.remove("open");
+        deleteAlert.setAttribute("aria-hidden", "true");
+    }
+
+    document.querySelectorAll(".delete-job-btn").forEach(link => {
+        link.addEventListener("click", (e) => {
+            e.preventDefault();       // stop the link from going to the delete page
+            deleteUrl = link.getAttribute("href");
+            deleteTitle = link.dataset.title;
+            showDeleteAlert(link.dataset.blocked ? "blocked" : "confirm", deleteTitle);
+        });
+    });
+
+    deleteBtn.addEventListener("click", async () => {
+        if (deleteBtn.dataset.mode !== "confirm") {   // "OK" on the can't-delete message
+            closeDeleteAlert();
+            return;
+        }
+        deleteBtn.disabled = true;
+        try {
+            const res = await fetch(deleteUrl, {
+                method: "POST",
+                body: new FormData(deleteForm),       // includes the CSRF token
+                credentials: "same-origin",
+            });
+            if (res.status === 409) {
+                showDeleteAlert("blocked", deleteTitle);   // someone applied in the meantime
+            } else if (res.ok) {
+                window.location.reload();             // deleted: refresh the list
+            } else {
+                deleteForm.action = deleteUrl;        // anything unexpected: normal submit
+                deleteForm.submit();
+            }
+        } catch (err) {
+            deleteForm.action = deleteUrl;            // network problem: normal submit
+            deleteForm.submit();
+        } finally {
+            deleteBtn.disabled = false;
+        }
+    });
+
+    document.getElementById("delete-alert-x").addEventListener("click", closeDeleteAlert);
+    deleteAlert.addEventListener("click", (e) => {
+        if (e.target === deleteAlert) closeDeleteAlert();     // click on the dark background
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeDeleteAlert();
+    });
+</script>
 {% endblock %}

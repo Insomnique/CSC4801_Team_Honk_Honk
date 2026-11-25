@@ -1,11 +1,150 @@
 {% extends "base.html" %}
-{% block title %}Register{% endblock %}
+{% block title %}Sign Up{% endblock %}
 {% block content %}
-<h1>Register</h1>
-<form method="post">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit">Create account</button>
-</form>
-<p><a href="{% url 'accounts:login' %}">Already have an account?</a></p>
+<style>
+    nav .user-icon { display: none; }
+
+    .back-btn {
+        position: absolute;
+        top: 8px;
+        left: 13px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.5em;
+        height: 1.5em;
+        background-color: #000;
+        border-radius: 50%;
+    }
+    .back-btn svg {
+        width: 70%;
+        height: 70%;
+        fill: none;
+        stroke: #fff;
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .register-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        min-height: calc(100vh - 16px);
+        padding: 20px;
+    }
+    .register-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.10);
+        padding: 36px 40px;
+        width: 100%;
+        max-width: 380px;
+    }
+    .register-card h1 {
+        font-size: 36px;
+        font-weight: 800;
+        letter-spacing: -1px;
+        margin: 0 0 24px 0;
+    }
+    .register-card form p {
+        margin: 0 0 16px 0;
+    }
+    .register-card label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 6px;
+        color: #222;
+    }
+    .register-card input,
+    .register-card select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: 15px;
+    }
+    .register-card select {
+        appearance: none;
+        -webkit-appearance: none;
+        padding-right: 38px;
+        background-color: #fff;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%23222' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 14px center;
+        cursor: pointer;
+    }
+    .register-card input:focus,
+    .register-card select:focus {
+        outline: none;
+        border-color: #222;
+    }
+
+    /* Requirements under each input */
+    .register-card .helptext,
+    .register-card form ul:not(.errorlist),
+    .register-card form ul:not(.errorlist) li {
+        font-size: 12px;
+        line-height: 1.4;
+        color: #999;
+    }
+    .register-card .helptext {
+        display: block;
+        margin-top: 6px;
+    }
+    .register-card form ul:not(.errorlist) {
+        margin: 6px 0 16px 0;
+        padding-left: 18px;
+    }
+
+    .register-card .errorlist {
+        color: #d32f2f;
+    }
+
+    .register-card button[type="submit"] {
+        width: 100%;
+        margin-top: 8px;
+        padding: 12px 20px;
+        border: none;
+        border-radius: 6px;
+        background: #222;
+        color: #fff;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .register-card button[type="submit"]:hover {
+        background: #000;
+    }
+    .register-help {
+        margin-top: 20px;
+        font-size: 14px;
+        color: #888;
+        text-align: center;
+    }
+    .register-help a {
+        color: #888;
+        text-decoration: underline;
+    }
+</style>
+
+<a href="{% url 'accounts:home' %}" class="back-btn" aria-label="Back to home" title="Back to home">
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M15 5l-7 7 7 7"/>
+    </svg>
+</a>
+
+<div class="register-wrap">
+    <div class="register-card">
+        <h1>Register</h1>
+        <form method="post">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <button type="submit">Create account</button>
+        </form>
+        <p class="register-help">Already have a account? <a href="{% url 'accounts:login' %}">Log in</a></p>
+    </div>
+</div>
 {% endblock %}

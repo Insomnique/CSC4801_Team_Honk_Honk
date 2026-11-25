@@ -1,11 +1,119 @@
 {% extends "base.html" %}
 {% block title %}Log in{% endblock %}
 {% block content %}
-<h1>Log in</h1>
-<form method="post">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit">Log in</button>
-</form>
-<p><a href="{% url 'accounts:register' %}">Need an account?</a></p>
+<style>
+    nav .user-icon { display: none; }
+
+    .login-card .errorlist {
+        color: #d32f2f;
+    }
+
+    .back-btn {
+        position: absolute;
+        top: 8px;
+        left: 13px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.5em;
+        height: 1.5em;
+        background-color: #000;
+        border-radius: 50%;
+    }
+    .back-btn svg {
+        width: 70%;
+        height: 70%;
+        fill: none;
+        stroke: #fff;
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .login-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: calc(100vh - 120px);
+        padding: 20px;
+    }
+    .login-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.10);
+        padding: 36px 40px;
+        width: 100%;
+        max-width: 380px;
+    }
+    .login-card h1 {
+        font-size: 36px;
+        font-weight: 800;
+        letter-spacing: -1px;
+        margin: 0 0 24px 0;
+    }
+    .login-card form p {
+        margin: 0 0 16px 0;
+    }
+    .login-card label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 6px;
+        color: #222;
+    }
+    .login-card input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: 15px;
+    }
+    .login-card input:focus {
+        outline: none;
+        border-color: #222;
+    }
+    .login-card button[type="submit"] {
+        width: 100%;
+        margin-top: 8px;
+        padding: 12px 20px;
+        border: none;
+        border-radius: 6px;
+        background: #222;
+        color: #fff;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .login-card button[type="submit"]:hover {
+        background: #000;
+    }
+    .login-help {
+        margin-top: 20px;
+        font-size: 14px;
+        color: #888;
+        text-align: center;
+    }
+    .login-help a {
+        color: #888;
+        text-decoration: underline;
+    }
+</style>
+
+<a href="{% url 'accounts:home' %}" class="back-btn" aria-label="Back to home" title="Back to home">
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M15 5l-7 7 7 7"/>
+    </svg>
+</a>
+
+<div class="login-wrap">
+    <div class="login-card">
+        <h1>Log in</h1>
+        <form method="post">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <button type="submit">Log in</button>
+        </form>
+        <p class="login-help">Don't have an account? <a href="{% url 'accounts:register' %}">Sign up</a></p>
+    </div>
+</div>
 {% endblock %}

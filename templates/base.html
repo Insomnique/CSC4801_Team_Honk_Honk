@@ -2,32 +2,260 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{% block title %}Honk Honk Recruiting{% endblock %}</title>
+    <title>{% block title %}HonkIn{% endblock %}</title>
+    <style>
+        body {
+            background-color: #faf8f5;
+        }
+        nav {
+            display: flex;
+            align-items: center;
+        }
+
+        .user-icon {
+            margin-left: auto;
+            margin-right: 5px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.5em;
+            height: 1.5em;
+            background-color: #000;
+            border-radius: 50%;
+        }
+        .user-icon svg {
+            width: 70%;
+            height: 70%;
+            fill: #fff;
+        }
+
+        .user-menu {
+            margin-left: auto;
+            margin-right: 5px;
+            position: relative;
+        }
+        .user-icon-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.5em;
+            height: 1.5em;
+            background-color: #000;
+            border: none;
+            border-radius: 50%;
+            padding: 0;
+            cursor: pointer;
+            font-size: inherit;
+        }
+        .user-icon-btn svg {
+            width: 70%;
+            height: 70%;
+            fill: #fff;
+        }
+        .user-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 8px;
+            background: #000;
+            border-radius: 6px;
+            min-width: 120px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+            overflow: hidden;
+            z-index: 100;
+        }
+        .user-menu.open .user-dropdown {
+            display: block;
+        }
+        .user-dropdown button[type="submit"] {
+            display: block;
+            width: 100%;
+            padding: 10px 14px;
+            background: none;
+            border: none;
+            color: #fff;
+            text-align: left;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .user-dropdown button[type="submit"]:hover {
+            background: #222;
+        }
+
+        /* ---- sidebar ---- */
+        .app-layout {
+            display: flex;
+            align-items: flex-start;
+        }
+        .app-main {
+            flex: 1;
+            min-width: 0;
+        }
+        .app-sidebar {
+            flex: 0 0 auto;
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px;
+            background: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+            height: 800px;
+        }
+        .app-sidebar a {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            margin-bottom: 4px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            color: #222;
+        }
+        .app-sidebar a svg {
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .app-sidebar a.active {
+            background: #000;
+            color: #fff;
+        }
+
+        .app-left {
+            width: 220px;
+            flex-shrink: 0;
+            box-sizing: border-box;
+            margin: 5px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            position: sticky;
+            top: 5px;
+            height: calc(100vh - 10px);
+        }
+        .app-logo {
+            padding: 3px 12px;
+            text-align: left;
+            font-size: 24px;
+            font-weight: 800;
+            letter-spacing: -1px;
+            color: #222;
+        }
+    </style>
 </head>
 <body>
-    <nav>
-        <a href="{% url 'accounts:dashboard' %}">Dashboard</a>
-        {% if user.is_authenticated %}
-            {% if user.role == "candidate" %}
-                | <a href="{% url 'jobs:candidate_dashboard' %}">Browse jobs</a>
-                | <a href="{% url 'jobs:my_applications' %}">My applications</a>
-                | <a href="{% url 'accounts:candidate_profile' %}">My profile</a>
-            {% elif user.role == "employer" %}
-                | <a href="{% url 'jobs:job_list' %}">My jobs</a>
-                | <a href="{% url 'jobs:slot_list' %}">My slots</a>
-                | <a href="{% url 'accounts:employer_profile' %}">Company profile</a>
-            {% endif %}
-            | <span>Logged in as {{ user.username }} ({{ user.role }})</span>
-            <form method="post" action="{% url 'accounts:logout' %}" style="display:inline">
-                {% csrf_token %}
-                <button type="submit">Log out</button>
-            </form>
-        {% else %}
-            | <a href="{% url 'accounts:login' %}">Log in</a>
-            | <a href="{% url 'accounts:register' %}">Register</a>
+    <div class="app-layout">
+        {% if user.is_authenticated and user.role == "candidate" %}
+        <div class="app-left">
+            <div class="app-logo">HonkIn</div>
+            <aside class="app-sidebar">
+                <a href="{% url 'accounts:dashboard' %}" {% if request.resolver_match.view_name == 'accounts:dashboard' %}class="active"{% endif %}>
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <rect x="3" y="3" width="7" height="7" rx="1"/>
+                        <rect x="14" y="3" width="7" height="7" rx="1"/>
+                        <rect x="3" y="14" width="7" height="7" rx="1"/>
+                        <rect x="14" y="14" width="7" height="7" rx="1"/>
+                    </svg>
+                    Dashboard
+                </a>
+                <a href="{% url 'jobs:candidate_dashboard' %}" {% if request.resolver_match.view_name == 'jobs:candidate_dashboard' %}class="active"{% endif %}>
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <rect x="3" y="7" width="18" height="13" rx="2"/>
+                        <path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/>
+                        <path d="M3 13h18"/>
+                    </svg>
+                    Browse Jobs
+                </a>
+                <a href="{% url 'jobs:my_applications' %}" {% if request.resolver_match.view_name == 'jobs:my_applications' %}class="active"{% endif %}>
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>
+                        <path d="M14 3v5h5"/>
+                        <path d="M9 13h6M9 17h6"/>
+                    </svg>
+                    My Applications
+                </a>
+            </aside>
+        </div>
         {% endif %}
-    </nav>
-    <hr>
-    {% block content %}{% endblock %}
+
+        {% if user.is_authenticated and user.role == "employer" %}
+        <div class="app-left">
+            <div class="app-logo">HonkIn</div>
+            <aside class="app-sidebar">
+                <a href="{% url 'accounts:dashboard' %}" {% if request.resolver_match.view_name == 'accounts:dashboard' %}class="active"{% endif %}>
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <rect x="3" y="3" width="7" height="7" rx="1"/>
+                        <rect x="14" y="3" width="7" height="7" rx="1"/>
+                        <rect x="3" y="14" width="7" height="7" rx="1"/>
+                        <rect x="14" y="14" width="7" height="7" rx="1"/>
+                    </svg>
+                    Dashboard
+                </a>
+                <a href="{% url 'jobs:job_list' %}" {% if request.resolver_match.view_name == 'jobs:job_list' %}class="active"{% endif %}>
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <rect x="3" y="7" width="18" height="13" rx="2"/>
+                        <path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/>
+                        <path d="M3 13h18"/>
+                    </svg>
+                    My Postings
+                </a>
+                <a href="{% url 'jobs:slot_list' %}" {% if request.resolver_match.view_name == 'jobs:slot_list' %}class="active"{% endif %}>
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <rect x="3" y="5" width="18" height="16" rx="2"/>
+                        <path d="M16 3v4M8 3v4M3 11h18"/>
+                    </svg>
+                    My Slots
+                </a>
+            </aside>
+        </div>
+        {% endif %}
+
+        <div class="app-main">
+            <nav>
+                {% if user.is_authenticated %}
+                    <div class="user-menu" id="user-menu">
+                        <button type="button" class="user-icon-btn" aria-label="Account menu" title="Account menu"
+                                onclick="document.getElementById('user-menu').classList.toggle('open')">
+                            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <circle cx="12" cy="8" r="4"/>
+                                <path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8z"/>
+                            </svg>
+                        </button>
+                        <div class="user-dropdown">
+                            <form method="post" action="{% url 'accounts:logout' %}">
+                                {% csrf_token %}
+                                <button type="submit">Log out</button>
+                            </form>
+                        </div>
+                    </div>
+                {% else %}
+                    <a href="{% url 'accounts:login' %}" class="user-icon" aria-label="Log in" title="Log in">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <circle cx="12" cy="8" r="4"/>
+                            <path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8z"/>
+                        </svg>
+                    </a>
+                {% endif %}
+            </nav>
+
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener("click", function (e) {
+            const menu = document.getElementById("user-menu");
+            if (menu && !menu.contains(e.target)) {
+                menu.classList.remove("open");
+            }
+        });
+    </script>
 </body>
 </html>

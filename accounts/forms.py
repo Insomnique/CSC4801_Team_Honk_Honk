@@ -41,8 +41,9 @@ class CandidateProfileForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Pre-fill the input with a comma-separated string when editing
-        if self.instance and isinstance(self.instance.skills, list):
-            self.fields["skills"].initial = ", ".join(self.instance.skills)
+        skills = self.instance.skills if self.instance else []
+        if isinstance(skills, list):
+            self.initial["skills"] = ", ".join(skills)
 
     def clean_skills(self):
         raw = self.cleaned_data.get("skills") or ""

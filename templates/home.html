@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}HonkIn — Honk Honk{% endblock %}
+
+{% block content %}
+<style>
+    .home-card {
+        background: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+        max-width: none;
+        margin: 5px 5px;
+        padding: 20px;
+        min-height: auto;
+    }
+    .home-hero {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 40px;
+        padding: 40px;
+        max-width: 1500px;
+        margin: 0 auto;
+        min-height: 690px;
+    }
+    .home-hero-text {
+        flex: 1;
+    }
+    .home-hero-text h1 {
+        font-size: 72px;
+        font-weight: 800;
+        margin: 0 0 16px 0;
+        line-height: 1.05;
+        letter-spacing: -2px;
+    }
+    .home-hero-text p {
+        font-size: 20px;
+        line-height: 1.5;
+        color: #444;
+        margin: 0 0 24px 0;
+        max-width: 520px;
+    }
+    .home-hero-text a {
+        display: inline-block;
+        margin-right: 12px;
+        padding: 10px 20px;
+        border-radius: 6px;
+        text-decoration: none;
+        font-weight: 600;
+        background: #222;
+        color: #fff;
+    }
+    .home-hero-text a.secondary {
+        background: transparent;
+        color: #222;
+        border: 2px solid #222;
+    }
+    .home-hero-image {
+        flex: 1;
+        display: flex;
+        justify-content: center;
+    }
+    .home-hero-image img {
+        max-width: 100%;
+        width: 500px;
+        height: auto;
+        border-radius: 12px;
+        display: block;
+    }
+</style>
+
+<div class="home-card">
+    <section class="home-hero">
+        <div class="home-hero-text">
+            <h1>HonkIn</h1>
+            <p>Find jobs that match your skills, apply in one click, and book interviews — all in one place.</p>
+            <a href="{% url 'accounts:register' %}">Get started</a>
+            <a href="{% url 'accounts:login' %}" class="secondary">Log in</a>
+        </div>
+        <div class="home-hero-image">
+            <img src="{% static 'ducks.jpg' %}" alt="Duck mascot">
+        </div>
+    </section>
+</div>
+{% endblock %}

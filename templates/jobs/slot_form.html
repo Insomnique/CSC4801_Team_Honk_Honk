@@ -5,7 +5,7 @@
 <form method="post">
     {% csrf_token %}
     {{ form.as_p }}
-    <p><em>Slots are exactly 30 minutes; end time is set automatically.</em></p>
+    <p><em>Enter the start time in <strong>UTC</strong>. Slots are exactly 30 minutes; end time is set automatically.</em></p>
     <button type="submit">Create slot</button>
 </form>
 <p><a href="{% url 'jobs:slot_list' %}">Back to slots</a></p>

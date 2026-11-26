@@ -101,6 +101,17 @@ class PasswordStorageTests(TestCase):
         self.assertTrue(user.password.startswith("pbkdf2_"))
         self.assertTrue(user.check_password("testpass123"))
 
+    def test_password_hash_never_rendered(self):
+        user = User.objects.create_user(
+            username="nohash", email="nohash@example.com",
+            password="testpass123", role="candidate",
+        )
+        self.client.login(username="nohash", password="testpass123")
+        for name in ("accounts:dashboard", "accounts:candidate_profile"):
+            response = self.client.get(reverse(name))
+            self.assertNotContains(response, user.password)
+            self.assertNotContains(response, "testpass123")
+
 
 class AuthRequiredTests(TestCase):
     def test_dashboard_requires_login(self):
@@ -141,6 +152,19 @@ class ProfileTests(TestCase):
         self.assertEqual(u.candidate_profile.display_name, "Alice")
         self.assertEqual(u.candidate_profile.skills, ["Python", "SQL"])
 
+    def test_resume_saved_viewed_and_replaced(self):
+        u = User.objects.create_user(username="rs", email="rs@e.com",
+                                     password="pw", role="candidate")
+        self.client.login(username="rs", password="pw")
+        url = reverse("accounts:candidate_profile")
+        self.client.post(url, {"display_name": "R", "skills": "Python", "resume_text": "First resume"})
+        u.candidate_profile.refresh_from_db()
+        self.assertEqual(u.candidate_profile.resume_text, "First resume")
+        self.assertContains(self.client.get(url), "First resume")
+        self.client.post(url, {"display_name": "R", "skills": "Python", "resume_text": "Second resume"})
+        u.candidate_profile.refresh_from_db()
+        self.assertEqual(u.candidate_profile.resume_text, "Second resume")
+
     def test_candidate_profile_403_for_employer(self):
         u = User.objects.create_user(username="ep", email="ep@e.com",
                                      password="pw", role="employer")
@@ -172,6 +196,6 @@ class ProfileTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/accounts/login/", response.url)
 
-    def test_root_redirects_to_dashboard(self):
+    def test_root_redirects_to_home(self):
         response = self.client.get("/")
-        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse("accounts:home"), fetch_redirect_response=False)

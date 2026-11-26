@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Delete slot{% endblock %}
 {% block content %}
-<h1>Delete slot "{{ slot.start_time|date:"Y-m-d H:i" }}"?</h1>
+<h1>Delete slot "{{ slot.start_time|date:"Y-m-d H:i" }} UTC"?</h1>
 <form method="post">
     {% csrf_token %}
     <button type="submit">Yes, delete</button>

@@ -60,7 +60,7 @@ You should see the login page (the root URL redirects there if not authenticated
 docker compose exec web python manage.py test accounts jobs -v 2
 ```
 
-Expected: **103 tests, OK.** The first run creates a fresh `test_honk` database and destroys it afterward — your real data is untouched. Takes ~2 minutes (Django 5.2's PBKDF2 iteration count).
+Expected: **104 tests, OK.** The first run creates a fresh `test_honk` database and destroys it afterward — your real data is untouched. Takes ~2 minutes (Django 5.2's PBKDF2 iteration count).
 
 ## Stop
 

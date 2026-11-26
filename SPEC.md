@@ -67,7 +67,8 @@ Application     ─1:1─ Booking ─1:1─ Slot
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/` | any | Redirect to `/accounts/dashboard/` |
+| GET | `/` | any | Redirect to `/accounts/home/` |
+| GET | `/accounts/home/` | any | Landing page |
 | GET/POST | `/accounts/register/` | anon | Register (choose role) |
 | GET/POST | `/accounts/login/` | anon | Log in |
 | POST | `/accounts/logout/` | auth | Log out |
@@ -156,6 +157,7 @@ The race condition: two candidates concurrently attempt to book the same slot. T
 
 | Screen | Route | Role |
 |---|---|---|
+| Home | `/accounts/home/` | any |
 | Register | `/accounts/register/` | anon |
 | Log in | `/accounts/login/` | anon |
 | Candidate dashboard | `/accounts/dashboard/` | candidate |

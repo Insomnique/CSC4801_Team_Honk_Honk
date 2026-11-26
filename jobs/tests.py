@@ -549,6 +549,14 @@ class BookingEligibilityTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(Booking.objects.filter(application=self.app, slot=self.slot).exists())
 
+    def test_non_numeric_application_id_returns_404(self):
+        self.client.login(username="bcand", password="pw")
+        for bad in ("abc", "", "1 OR 1=1"):
+            with self.subTest(application_pk=bad):
+                response = self.client.post(reverse("jobs:book_slot", args=[self.slot.pk]), {"application_pk": bad})
+                self.assertEqual(response.status_code, 404)
+        self.assertFalse(Booking.objects.exists())
+
     def test_booking_using_other_candidates_application_403(self):
         self.client.login(username="bcand", password="pw")
         response = self.client.post(reverse("jobs:book_slot", args=[self.slot.pk]), {"application_pk": self.other_app.pk})

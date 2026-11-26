@@ -15,7 +15,7 @@ from .models import Application, Job, Slot
 from .models import Application, Booking, Job, Slot
 from django.utils import timezone
 
-from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 
 def _employer_or_403(request):
     if request.user.role != "employer":
@@ -268,7 +268,9 @@ def book_slot(request, slot_pk):
         return HttpResponseForbidden("POST only.")
 
     slot = get_object_or_404(Slot, pk=slot_pk)
-    application_pk = request.POST.get("application_pk")
+    application_pk = request.POST.get("application_pk", "")
+    if not application_pk.isdigit():
+        raise Http404("Application not found.")
     app = get_object_or_404(Application, pk=application_pk)
 
     # Rule 1: candidate owns the application

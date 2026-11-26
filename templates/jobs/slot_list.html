@@ -261,6 +261,7 @@
 <div class="dash-wrap">
     <div class="dash-greeting">
         <h1>My Availability Slots</h1>
+        <p><em>All times are in UTC.</em></p>
     </div>
 
     <div class="post-row">
@@ -271,7 +272,7 @@
         {% if slots %}
         <table class="post-table">
             <thead>
-                <tr><th>Start</th><th>End</th><th>Booked</th><th class="col-actions"></th></tr>
+                <tr><th>Start (UTC)</th><th>End (UTC)</th><th>Booked</th><th class="col-actions"></th></tr>
             </thead>
             <tbody>
             {% for slot in slots %}
@@ -279,10 +280,10 @@
                     <td>{{ slot.start_time|date:"Y-m-d H:i" }}</td>
                     <td>{{ slot.end_time|date:"Y-m-d H:i" }}</td>
                     {% if slot.is_booked %}
-                        <td class="booked-yes">Yes</td>
+                        <td class="booked-yes">Yes — {{ slot.booking.application.candidate.candidate_profile.display_name|default:slot.booking.application.candidate.username }} ({{ slot.booking.application.job.title }})</td>
                     {% else %}
                         <td class="booked-no">No</td>
-                    {% endif %}
+                    {% endif %}                    
                     <td class="col-actions">
                         <div class="row-actions">
                             <a href="{% url 'jobs:slot_delete' slot.pk %}" class="edit-btn delete-slot-btn"

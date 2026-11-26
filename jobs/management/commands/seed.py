@@ -4,9 +4,11 @@ Deterministic seed data for local development and demonstration.
 Run:  docker compose exec web python manage.py seed
 This command WIPES all application data, then repopulates it.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.core.management.base import BaseCommand
+from django.core.management.color import no_style
+from django.db import connection
 from django.utils import timezone
 
 from accounts.models import CandidateProfile, EmployerProfile, User
@@ -14,7 +16,7 @@ from jobs.models import Application, Booking, Job, Slot
 
 
 class Command(BaseCommand):
-    help = "Reset and seed deterministic demo data (2 candidates, 2 employers, 2 jobs, 4 statuses, 2 racers)."
+    help = "Reset and seed deterministic demo data (3 candidates, 2 employers, 3 jobs, 4 statuses, 2 racers)."
 
     def handle(self, *args, **options):
         self.stdout.write("Wiping existing data...")
@@ -25,6 +27,12 @@ class Command(BaseCommand):
         CandidateProfile.objects.all().delete()
         EmployerProfile.objects.all().delete()
         User.objects.filter(is_superuser=False).delete()
+        # Restart ID sequences so every run produces the same IDs (deterministic seed).
+        with connection.cursor() as cursor:
+            for sql in connection.ops.sequence_reset_sql(
+                no_style(), [User, CandidateProfile, EmployerProfile, Job, Application, Slot, Booking]
+            ):
+                cursor.execute(sql)
 
         self.stdout.write("Creating users...")
         # Employers
@@ -78,6 +86,12 @@ class Command(BaseCommand):
             description="Systems programming in Rust.",
             required_skills=["Rust"],
         )
+        # Job C: no required skills → every candidate scores 100%
+        Job.objects.create(
+            employer=emp2, title="Graduate Generalist",
+            description="Open to all backgrounds; no specific skills required.",
+            required_skills=[],
+        )
 
         self.stdout.write("Creating applications covering all four statuses...")
         # Alice → Job A: Interviewing (she can race for a slot)
@@ -98,25 +112,22 @@ class Command(BaseCommand):
         )
 
         self.stdout.write("Creating availability slots...")
-        now = timezone.now()
+        # Fixed UTC times so every run is identical. The future slots stay bookable
+        # until mid-2027; the past slot is always in the past.
+        thirty = timedelta(minutes=30)
+        race_start = datetime(2027, 6, 1, 2, 0, tzinfo=dt_timezone.utc)   # 10:00 Perth
+        second_start = datetime(2027, 6, 2, 2, 0, tzinfo=dt_timezone.utc)
+        past_start = datetime(2025, 1, 1, 2, 0, tzinfo=dt_timezone.utc)
+        if race_start <= timezone.now():
+            self.stderr.write(self.style.WARNING(
+                "Seed slot dates are in the past; update race_start in jobs/management/commands/seed.py."
+            ))
         # A shared future slot both Interviewing candidates can race for
-        future1 = Slot.objects.create(
-            employer=emp1,
-            start_time=now + timedelta(days=1, hours=10),
-            end_time=now + timedelta(days=1, hours=10, minutes=30),
-        )
+        future1 = Slot.objects.create(employer=emp1, start_time=race_start, end_time=race_start + thirty)
         # A second future slot
-        Slot.objects.create(
-            employer=emp1,
-            start_time=now + timedelta(days=2, hours=10),
-            end_time=now + timedelta(days=2, hours=10, minutes=30),
-        )
+        Slot.objects.create(employer=emp1, start_time=second_start, end_time=second_start + thirty)
         # A past slot (should not appear as bookable)
-        Slot.objects.create(
-            employer=emp1,
-            start_time=now - timedelta(days=1),
-            end_time=now - timedelta(days=1, minutes=-30),
-        )
+        Slot.objects.create(employer=emp1, start_time=past_start, end_time=past_start + thirty)
 
         self.stdout.write("Seeding a Demo Accepted application too (to cover status variety)...")
         # Give DataCorp one more application in Accepted state
@@ -143,4 +154,4 @@ class Command(BaseCommand):
         self.stdout.write("  candidate_carol   / demo12345  (Candidate — Rust)")
         self.stdout.write("")
         self.stdout.write("Two Interviewing candidates (alice, bob) share a future slot from TechCo.")
-        self.stdout.write(f"Slot ID {future1.id} at {future1.start_time} — race it via the UI.")
+        self.stdout.write(f"Slot ID {future1.id} at {future1.start_time:%Y-%m-%d %H:%M} UTC — race it via the UI.")

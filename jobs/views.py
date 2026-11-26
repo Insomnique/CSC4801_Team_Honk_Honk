@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from accounts.models import CandidateProfile
 
 from .forms import JobForm
-from .matching import candidate_job_sort_key, match_score
+from .matching import candidate_job_sort_key, employer_applicant_sort_key, match_score
 from .models import Application, Job
 
 from .forms import JobForm, SlotForm
@@ -15,7 +15,7 @@ from .models import Application, Job, Slot
 from .models import Application, Booking, Job, Slot
 from django.utils import timezone
 
-from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 
 def _employer_or_403(request):
     if request.user.role != "employer":
@@ -71,15 +71,17 @@ def job_delete(request, pk):
     denied = _employer_or_403(request)
     if denied:
         return denied
-    job = get_object_or_404(Job, pk=pk, is_deleted=False)
-    if job.employer_id != request.user.id:
-        return HttpResponseForbidden("Not your job.")
-    if job.has_dependents():
-        return HttpResponse("Cannot delete: job has applications or slots.", status=409)
-    if request.method == "POST":
-        job.is_deleted = True
-        job.save()
-        return redirect("jobs:job_list")
+    with transaction.atomic():
+        # Lock the job row so an application cannot land between the check and the delete (FP-EMP-2)
+        job = get_object_or_404(Job.objects.select_for_update(), pk=pk, is_deleted=False)
+        if job.employer_id != request.user.id:
+            return HttpResponseForbidden("Not your job.")
+        if job.has_dependents():
+            return HttpResponse("Cannot delete: job has applications or slots.", status=409)
+        if request.method == "POST":
+            job.is_deleted = True
+            job.save()
+            return redirect("jobs:job_list")
     return render(request, "jobs/job_delete.html", {"job": job})
 
 
@@ -107,18 +109,19 @@ def job_detail(request, pk):
 def apply_to_job(request, pk):
     if request.user.role != "candidate":
         return HttpResponseForbidden("Only candidates can apply.")
-    job = get_object_or_404(Job, pk=pk, is_deleted=False)
+    get_object_or_404(Job, pk=pk, is_deleted=False)
     if request.method != "POST":
         return HttpResponseForbidden("Apply via POST.")
     try:
         with transaction.atomic():
+            # Lock the job row: waits for an in-progress delete, then re-checks the job still exists (FP-EMP-2)
+            job = get_object_or_404(Job.objects.select_for_update(), pk=pk, is_deleted=False)
             Application.objects.create(
                 candidate=request.user, job=job, status=Application.Status.PENDING
             )
     except IntegrityError:
         return HttpResponse("You have already applied to this job.", status=409)
     return redirect("jobs:my_applications")
-
 
 @login_required
 def my_applications(request):
@@ -140,7 +143,7 @@ def job_applicants(request, pk):
 
     apps = (
         Application.objects.filter(job=job)
-        .select_related("candidate", "candidate__candidate_profile")
+        .select_related("candidate", "candidate__candidate_profile", "booking__slot")
     )
     scored = [
         (
@@ -153,18 +156,8 @@ def job_applicants(request, pk):
         )
         for app in apps
     ]
-    # Sort by score desc, then display name (ci), then candidate id
-    scored.sort(
-        key=lambda pair: (
-            -pair[0],
-            (
-                getattr(pair[1].candidate, "candidate_profile", None)
-                and pair[1].candidate.candidate_profile.display_name
-                or pair[1].candidate.username
-            ).lower(),
-            pair[1].candidate.id,
-        )
-    )
+    # Sort by score desc, then display name (ci), then candidate id (FP-MATCH-1)
+    scored.sort(key=employer_applicant_sort_key)
 
     template = (
         "jobs/_applicants_table.html"
@@ -229,14 +222,16 @@ def slot_create(request):
 def slot_delete(request, pk):
     if request.user.role != "employer":
         return HttpResponseForbidden("Only employers manage slots.")
-    slot = get_object_or_404(Slot, pk=pk)
-    if slot.employer_id != request.user.id:
-        return HttpResponseForbidden("Not your slot.")
-    if slot.is_booked():
-        return HttpResponse("Cannot delete a booked slot.", status=409)
-    if request.method == "POST":
-        slot.delete()
-        return redirect("jobs:slot_list")
+    with transaction.atomic():
+        # Lock the slot row so a booking cannot land between the check and the delete (FP-SCHED-1)
+        slot = get_object_or_404(Slot.objects.select_for_update(), pk=pk)
+        if slot.employer_id != request.user.id:
+            return HttpResponseForbidden("Not your slot.")
+        if slot.is_booked():
+            return HttpResponse("Cannot delete a booked slot.", status=409)
+        if request.method == "POST":
+            slot.delete()
+            return redirect("jobs:slot_list")
     return render(request, "jobs/slot_delete.html", {"slot": slot})
 
 
@@ -268,7 +263,9 @@ def book_slot(request, slot_pk):
         return HttpResponseForbidden("POST only.")
 
     slot = get_object_or_404(Slot, pk=slot_pk)
-    application_pk = request.POST.get("application_pk")
+    application_pk = request.POST.get("application_pk", "")
+    if not application_pk.isdigit():
+        raise Http404("Application not found.")
     app = get_object_or_404(Application, pk=application_pk)
 
     # Rule 1: candidate owns the application
@@ -286,17 +283,6 @@ def book_slot(request, slot_pk):
     # Rule 5: application has no existing booking
     if Booking.objects.filter(application=app).exists():
         return HttpResponse("Application already has a booking.", status=409)
-    # Rule 6: slot must not overlap ANY interview this candidate already booked
-    overlaps = Booking.objects.filter(
-        application__candidate=request.user,
-        slot__start_time__lt=slot.end_time,
-        slot__end_time__gt=slot.start_time,
-    ).exists()
-    if overlaps:
-        return HttpResponse(
-            "This time overlaps with another interview you have already booked.",
-            status=409,
-        )
 
     try:
         with transaction.atomic():

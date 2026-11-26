@@ -71,6 +71,18 @@ class Slot(models.Model):
 
     class Meta:
         ordering = ["start_time", "id"]
+        constraints = [
+            # FP-SCHED-1: every slot is exactly 30 minutes and ends after it starts.
+            # Enforced by the database, so no code path can store an invalid slot.
+            models.CheckConstraint(
+                condition=models.Q(end_time=models.F("start_time") + timedelta(minutes=30)),
+                name="slot_exactly_30_minutes",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(end_time__gt=models.F("start_time")),
+                name="slot_end_after_start",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.employer.username} @ {self.start_time}"

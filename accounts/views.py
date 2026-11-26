@@ -11,9 +11,6 @@ from .forms import (
 )
 from .models import CandidateProfile, EmployerProfile
 
-import json
-from django.utils.safestring import mark_safe
-
 from jobs.models import Application, Booking, Job
 from jobs.matching import match_score, candidate_job_sort_key
 

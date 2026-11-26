@@ -1,4 +1,5 @@
 from django.test import SimpleTestCase
+from django.test import TransactionTestCase
 
 from .matching import (
     candidate_job_sort_key,
@@ -16,6 +17,11 @@ from django.test import TestCase
 from django.urls import reverse
 from accounts.models import User
 from .models import Job, Application, Slot, Booking
+
+def _slot_window(offset):
+    """Start/end for a valid 30-minute slot, computed from one clock reading."""
+    start = timezone.now() + offset
+    return {"start_time": start, "end_time": start + timedelta(minutes=30)}
 
 class NormalizeSkillsTests(SimpleTestCase):
     def test_trims_lowercases_dedupes(self):
@@ -78,13 +84,6 @@ class _FakeJob:
         self.id = id
         self.title = title
 
-
-class _FakeUser:
-    def __init__(self, id, username):
-        self.id = id
-        self.username = username
-
-
 class CandidateSortKeyTests(SimpleTestCase):
     def test_higher_score_first(self):
         jobs = [(_FakeJob(1, "A"), 80), (_FakeJob(2, "B"), 90)]
@@ -103,22 +102,39 @@ class CandidateSortKeyTests(SimpleTestCase):
         self.assertEqual([j.id for _, j in sorted_pairs], [1, 3])
 
 
-class EmployerSortKeyTests(SimpleTestCase):
+class EmployerSortKeyTests(TestCase):
+    """FP-MATCH-1 employer tie-break, using the same real objects the applicants page sorts."""
+
+    def setUp(self):
+        from accounts.models import CandidateProfile
+        self.emp = User.objects.create_user(username="sk_emp", email="sk_emp@e.com", password="pw", role="employer")
+        self.job = Job.objects.create(employer=self.emp, title="SK", description="d", required_skills=[])
+        self.CandidateProfile = CandidateProfile
+
+    def _applicant(self, username, display_name):
+        user = User.objects.create_user(username=username, email=f"{username}@e.com", password="pw", role="candidate")
+        self.CandidateProfile.objects.create(user=user, display_name=display_name, skills=[])
+        return Application.objects.create(candidate=user, job=self.job)
     def test_higher_score_first(self):
-        pairs = [(80, _FakeUser(1, "alice")), (90, _FakeUser(2, "bob"))]
-        sorted_pairs = sorted(pairs, key=employer_applicant_sort_key)
-        self.assertEqual([u.username for _, u in sorted_pairs], ["bob", "alice"])
+        low, high = self._applicant("low_u", "Low"), self._applicant("high_u", "High")
+        ordered = sorted([(80, low), (90, high)], key=employer_applicant_sort_key)
+        self.assertEqual([a.candidate.username for _, a in ordered], ["high_u", "low_u"])
 
     def test_tie_broken_by_case_insensitive_name(self):
-        pairs = [(50, _FakeUser(1, "Zoe")), (50, _FakeUser(2, "alice"))]
-        sorted_pairs = sorted(pairs, key=employer_applicant_sort_key)
-        self.assertEqual([u.username for _, u in sorted_pairs], ["alice", "Zoe"])
+        # Sorted by display name, not username: z_user ("adam") comes before a_user ("Zoe").
+        zoe, adam = self._applicant("a_user", "Zoe"), self._applicant("z_user", "adam")
+        ordered = sorted([(50, zoe), (50, adam)], key=employer_applicant_sort_key)
+        self.assertEqual([a.candidate.candidate_profile.display_name for _, a in ordered], ["adam", "Zoe"])
 
     def test_tie_broken_by_stable_id(self):
-        pairs = [(50, _FakeUser(5, "Same")), (50, _FakeUser(2, "same"))]
-        sorted_pairs = sorted(pairs, key=employer_applicant_sort_key)
-        self.assertEqual([u.id for _, u in sorted_pairs], [2, 5])
+        first, second = self._applicant("same_1", "Same"), self._applicant("same_2", "same")
+        ordered = sorted([(50, second), (50, first)], key=employer_applicant_sort_key)
+        self.assertEqual([a.candidate.id for _, a in ordered], [first.candidate.id, second.candidate.id])
 
+    def test_falls_back_to_username_without_display_name(self):
+        named, unnamed = self._applicant("zz_named", "Bob"), self._applicant("aa_unnamed", "")
+        ordered = sorted([(50, named), (50, unnamed)], key=employer_applicant_sort_key)
+        self.assertEqual([a.candidate.username for _, a in ordered], ["aa_unnamed", "zz_named"])
 
 from accounts.models import User
 from .models import Job
@@ -483,8 +499,7 @@ class SlotTests(TestCase):
     def test_delete_own_slot(self):
         slot = Slot.objects.create(
             employer=self.emp,
-            start_time=timezone.now() + timedelta(hours=1),
-            end_time=timezone.now() + timedelta(hours=1, minutes=30),
+            **_slot_window(timedelta(hours=1)),
         )
         self.client.login(username="semp", password="pw")
         response = self.client.post(reverse("jobs:slot_delete", args=[slot.pk]))
@@ -494,8 +509,7 @@ class SlotTests(TestCase):
     def test_delete_other_employers_slot_403(self):
         slot = Slot.objects.create(
             employer=self.other_emp,
-            start_time=timezone.now() + timedelta(hours=1),
-            end_time=timezone.now() + timedelta(hours=1, minutes=30),
+            **_slot_window(timedelta(hours=1)),
         )
         self.client.login(username="semp", password="pw")
         response = self.client.post(reverse("jobs:slot_delete", args=[slot.pk]))
@@ -505,13 +519,11 @@ class SlotTests(TestCase):
     def test_other_employer_slots_not_listed(self):
         Slot.objects.create(
             employer=self.emp,
-            start_time=timezone.now() + timedelta(hours=1),
-            end_time=timezone.now() + timedelta(hours=1, minutes=30),
+            **_slot_window(timedelta(hours=1)),
         )
         Slot.objects.create(
             employer=self.other_emp,
-            start_time=timezone.now() + timedelta(hours=2),
-            end_time=timezone.now() + timedelta(hours=2, minutes=30),
+            **_slot_window(timedelta(hours=2)),
         )
         self.client.login(username="semp", password="pw")
         response = self.client.get(reverse("jobs:slot_list"))
@@ -539,8 +551,7 @@ class BookingEligibilityTests(TestCase):
         self.other_app = Application.objects.create(candidate=self.other_cand, job=self.job, status="interviewing")
         self.slot = Slot.objects.create(
             employer=self.emp,
-            start_time=timezone.now() + timedelta(hours=1),
-            end_time=timezone.now() + timedelta(hours=1, minutes=30),
+            **_slot_window(timedelta(hours=1)),
         )
 
     def test_eligible_booking_created(self):
@@ -548,6 +559,14 @@ class BookingEligibilityTests(TestCase):
         response = self.client.post(reverse("jobs:book_slot", args=[self.slot.pk]), {"application_pk": self.app.pk})
         self.assertEqual(response.status_code, 302)
         self.assertTrue(Booking.objects.filter(application=self.app, slot=self.slot).exists())
+
+    def test_non_numeric_application_id_returns_404(self):
+        self.client.login(username="bcand", password="pw")
+        for bad in ("abc", "", "1 OR 1=1"):
+            with self.subTest(application_pk=bad):
+                response = self.client.post(reverse("jobs:book_slot", args=[self.slot.pk]), {"application_pk": bad})
+                self.assertEqual(response.status_code, 404)
+        self.assertFalse(Booking.objects.exists())
 
     def test_booking_using_other_candidates_application_403(self):
         self.client.login(username="bcand", password="pw")
@@ -557,8 +576,7 @@ class BookingEligibilityTests(TestCase):
     def test_slot_from_other_employer_403(self):
         other_slot = Slot.objects.create(
             employer=self.other_emp,
-            start_time=timezone.now() + timedelta(hours=1),
-            end_time=timezone.now() + timedelta(hours=1, minutes=30),
+            **_slot_window(timedelta(hours=1)),
         )
         self.client.login(username="bcand", password="pw")
         response = self.client.post(reverse("jobs:book_slot", args=[other_slot.pk]), {"application_pk": self.app.pk})
@@ -574,8 +592,7 @@ class BookingEligibilityTests(TestCase):
     def test_past_slot_409(self):
         past = Slot.objects.create(
             employer=self.emp,
-            start_time=timezone.now() - timedelta(hours=1),
-            end_time=timezone.now() - timedelta(minutes=30),
+            **_slot_window(-timedelta(hours=1)),
         )
         self.client.login(username="bcand", password="pw")
         response = self.client.post(reverse("jobs:book_slot", args=[past.pk]), {"application_pk": self.app.pk})
@@ -584,8 +601,7 @@ class BookingEligibilityTests(TestCase):
     def test_already_booked_application_409(self):
         other_slot = Slot.objects.create(
             employer=self.emp,
-            start_time=timezone.now() + timedelta(hours=2),
-            end_time=timezone.now() + timedelta(hours=2, minutes=30),
+            **_slot_window(timedelta(hours=2)),
         )
         Booking.objects.create(application=self.app, slot=self.slot)
         self.client.login(username="bcand", password="pw")
@@ -632,8 +648,7 @@ class AtomicityTests(TestCase):
         self.app2 = Application.objects.create(candidate=self.c2, job=self.job, status="interviewing")
         self.slot = Slot.objects.create(
             employer=self.emp,
-            start_time=timezone.now() + timedelta(hours=1),
-            end_time=timezone.now() + timedelta(hours=1, minutes=30),
+            **_slot_window(timedelta(hours=1)),
         )
 
     def test_concurrent_double_booking_one_wins(self):
@@ -700,3 +715,225 @@ class SecurityTests(TestCase):
         self.client.login(username="sec_emp", password="pw")
         response = self.client.get(reverse("accounts:candidate_profile"))
         self.assertEqual(response.status_code, 403)
+
+class SlotValidationTests(TestCase):
+    """FP-SCHED-1: invalid durations and end-before-start are rejected by the database."""
+ 
+    def setUp(self):
+        self.emp = User.objects.create_user(username="vemp", email="ve@e.com", password="pw", role="employer")
+        self.start = timezone.now() + timedelta(days=1)
+ 
+    def test_valid_30_minute_slot_accepted(self):
+        Slot.objects.create(employer=self.emp, start_time=self.start, end_time=self.start + timedelta(minutes=30))
+        self.assertEqual(Slot.objects.count(), 1)
+ 
+    def test_non_30_minute_slot_rejected(self):
+        from django.db import transaction
+        for minutes in (15, 29, 31, 45, 60):
+            with self.subTest(minutes=minutes):
+                with self.assertRaises(IntegrityError):
+                    with transaction.atomic():
+                        Slot.objects.create(
+                            employer=self.emp, start_time=self.start,
+                            end_time=self.start + timedelta(minutes=minutes),
+                        )
+        self.assertEqual(Slot.objects.count(), 0)
+ 
+    def test_end_before_start_rejected(self):
+        from django.db import transaction
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Slot.objects.create(
+                    employer=self.emp, start_time=self.start,
+                    end_time=self.start - timedelta(minutes=30),
+                )
+        self.assertEqual(Slot.objects.count(), 0)
+
+    def test_overlapping_slot_rejected(self):
+        start = self.start.replace(second=0, microsecond=0)   # the form only takes whole minutes
+        Slot.objects.create(employer=self.emp, start_time=start, end_time=start + timedelta(minutes=30))
+        self.client.login(username="vemp", password="pw")
+        overlap = (start + timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M")
+        response = self.client.post(reverse("jobs:slot_create"), {"start_time": overlap})
+        self.assertEqual(response.status_code, 200)            # form shown again with the error
+        self.assertContains(response, "overlaps with a slot you already created")
+        self.assertEqual(Slot.objects.filter(employer=self.emp).count(), 1)
+ 
+    def test_back_to_back_slot_allowed(self):
+        start = self.start.replace(second=0, microsecond=0)   # the form only takes whole minutes
+        Slot.objects.create(employer=self.emp, start_time=start, end_time=start + timedelta(minutes=30))
+        self.client.login(username="vemp", password="pw")
+        nxt = (start + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M")
+        self.client.post(reverse("jobs:slot_create"), {"start_time": nxt})
+        self.assertEqual(Slot.objects.filter(employer=self.emp).count(), 2)
+
+    def test_slot_form_shows_utc(self):
+        self.client.login(username="vemp", password="pw")
+        response = self.client.get(reverse("jobs:slot_create"))
+        self.assertContains(response, "UTC")
+ 
+ 
+class BookingVisibilityTests(TestCase):
+    """FP-SCHED-1/2, FP-CAN-3, FP-EMP-3: booked slots hidden; booking visible to both sides."""
+ 
+    def setUp(self):
+        from accounts.models import CandidateProfile
+        self.emp = User.objects.create_user(username="vis_emp", email="ve2@e.com", password="pw", role="employer")
+        self.c1 = User.objects.create_user(username="vis_c1", email="v1@e.com", password="pw", role="candidate")
+        self.c2 = User.objects.create_user(username="vis_c2", email="v2@e.com", password="pw", role="candidate")
+        CandidateProfile.objects.create(user=self.c1, display_name="Vis One", skills=["Python"])
+        CandidateProfile.objects.create(user=self.c2, display_name="Vis Two", skills=["Python"])
+        self.job = Job.objects.create(employer=self.emp, title="VJ", description="d", required_skills=["Python"])
+        self.app1 = Application.objects.create(candidate=self.c1, job=self.job, status="interviewing")
+        self.app2 = Application.objects.create(candidate=self.c2, job=self.job, status="interviewing")
+        start = (timezone.now() + timedelta(days=3)).replace(second=0, microsecond=0)
+        self.slot = Slot.objects.create(employer=self.emp, start_time=start, end_time=start + timedelta(minutes=30))
+        self.free = Slot.objects.create(
+            employer=self.emp, start_time=start + timedelta(hours=1),
+            end_time=start + timedelta(hours=1, minutes=30),
+        )
+        self.when = start.strftime("%Y-%m-%d %H:%M")
+ 
+    def test_booked_slot_not_shown_as_available(self):
+        Booking.objects.create(application=self.app1, slot=self.slot)
+        self.client.login(username="vis_c2", password="pw")
+        response = self.client.get(reverse("jobs:bookable_slots", args=[self.app2.pk]))
+        self.assertEqual(response.status_code, 200)
+        listed = list(response.context["slots"])
+        self.assertNotIn(self.slot, listed)
+        self.assertIn(self.free, listed)
+ 
+    def test_employer_applicant_list_shows_booking(self):
+        Booking.objects.create(application=self.app1, slot=self.slot)
+        self.client.login(username="vis_emp", password="pw")
+        response = self.client.get(reverse("jobs:job_applicants", args=[self.job.pk]))
+        self.assertContains(response, "Interview (UTC)")
+        self.assertContains(response, self.when)
+ 
+    def test_applicants_table_partial_shows_booking(self):
+        # The employer pages load the applicant list with fetch(); that partial must show the booking too.
+        Booking.objects.create(application=self.app1, slot=self.slot)
+        self.client.login(username="vis_emp", password="pw")
+        response = self.client.get(
+            reverse("jobs:job_applicants", args=[self.job.pk]), HTTP_X_REQUESTED_WITH="XMLHttpRequest"
+        )
+        self.assertTemplateUsed(response, "jobs/_applicants_table.html")
+        self.assertContains(response, "Interview (UTC)")
+        self.assertContains(response, self.when)
+
+    def test_candidate_sees_booking_after_leaving_interviewing(self):
+        Booking.objects.create(application=self.app1, slot=self.slot)
+        self.app1.status = "accepted"
+        self.app1.save()
+        self.client.login(username="vis_c1", password="pw")
+        response = self.client.get(reverse("jobs:my_applications"))
+        self.assertContains(response, f"Booked: {self.when}")
+        # The slot stays unavailable to others.
+        self.client.login(username="vis_c2", password="pw")
+        response = self.client.get(reverse("jobs:bookable_slots", args=[self.app2.pk]))
+        self.assertNotIn(self.slot, list(response.context["slots"]))
+ 
+ 
+class SeedCommandTests(TestCase):
+    """FP-DOC-3: the seed command is deterministic and covers the required data."""
+ 
+    def _seed(self):
+        from io import StringIO
+        from django.core.management import call_command
+        call_command("seed", stdout=StringIO(), stderr=StringIO())
+ 
+    def test_seed_covers_required_data(self):
+        self._seed()
+        self.assertGreaterEqual(User.objects.filter(role="candidate").count(), 2)
+        self.assertGreaterEqual(User.objects.filter(role="employer").count(), 2)
+        self.assertTrue(Job.objects.filter(required_skills=[]).exists())
+        self.assertEqual(            
+            set(Application.objects.values_list("status", flat=True)),
+            {"pending", "interviewing", "rejected", "accepted"},
+        )
+        self.assertGreaterEqual(Application.objects.filter(status="interviewing").count(), 2)
+        self.assertTrue(Slot.objects.filter(start_time__gt=timezone.now(), booking__isnull=True).exists())
+ 
+    def test_seed_is_repeatable(self):
+        self._seed()
+        first = sorted(Slot.objects.values_list("id", "start_time"))
+        first_jobs = sorted(Job.objects.values_list("id", "title"))
+        self._seed()
+        self.assertEqual(sorted(Slot.objects.values_list("id", "start_time")), first)
+        self.assertEqual(sorted(Job.objects.values_list("id", "title")), first_jobs)
+
+class DeleteRaceTests(TransactionTestCase):
+    """FP-SCHED-1 / FP-EMP-2: a delete racing a booking or an application must not lose data.
+
+    A synchronization barrier pauses the delete right after its check, then lets the other
+    request run. Each side uses its own thread and database connection, like two real users.
+    """
+    def _race(self, patch_target, method_name, delete, other):
+        import threading
+        from unittest import mock
+        from django.db import connection
+
+        checked, other_done = threading.Event(), threading.Event()
+        original = getattr(patch_target, method_name)
+
+        def paused(obj):
+            result = original(obj)
+            if threading.current_thread().name == "deleter":
+                checked.set()
+                other_done.wait(2)   # with the fix, the other request is blocked by the row lock, so this times out
+            return result
+
+        out = {}
+        def run(name, fn, event=None):
+            try:
+                if event: event.wait(5)
+                out[name] = fn()
+            finally:
+                if name == "other": other_done.set()
+                connection.close()
+
+        with mock.patch.object(patch_target, method_name, paused):
+            t1 = threading.Thread(target=run, args=("delete", delete), name="deleter")
+            t2 = threading.Thread(target=run, args=("other", other, checked))
+            t1.start(); t2.start(); t1.join(); t2.join()
+        return out
+
+    def _client(self, user):
+        from django.test import Client
+        c = Client(); c.force_login(user); return c
+
+    def test_slot_delete_racing_a_booking_keeps_data_consistent(self):
+        emp = User.objects.create_user(username="r_emp", email="r_emp@e.com", password="pw", role="employer")
+        cand = User.objects.create_user(username="r_cand", email="r_cand@e.com", password="pw", role="candidate")
+        job = Job.objects.create(employer=emp, title="RJ", description="d", required_skills=[])
+        app = Application.objects.create(candidate=cand, job=job, status="interviewing")
+        start = timezone.now() + timedelta(days=2)
+        slot = Slot.objects.create(employer=emp, start_time=start, end_time=start + timedelta(minutes=30))
+        out = self._race(
+            Slot, "is_booked",
+            delete=lambda: self._client(emp).post(reverse("jobs:slot_delete", args=[slot.pk])).status_code,
+            other=lambda: self._client(cand).post(reverse("jobs:book_slot", args=[slot.pk]), {"application_pk": str(app.pk)}).status_code,
+        )
+        booking_exists = Booking.objects.filter(application=app).exists()
+        slot_exists = Slot.objects.filter(pk=slot.pk).exists()
+        # Either the booking won (delete refused) or the delete won (booking refused); never both succeeding.
+        self.assertFalse(out["delete"] == 302 and out["other"] == 302, out)
+        self.assertEqual(booking_exists, out["other"] == 302, out)
+        if booking_exists:
+            self.assertTrue(slot_exists)
+
+    def test_job_delete_racing_an_application_keeps_data_consistent(self):
+        emp = User.objects.create_user(username="j_emp", email="j_emp@e.com", password="pw", role="employer")
+        cand = User.objects.create_user(username="j_cand", email="j_cand@e.com", password="pw", role="candidate")
+        job = Job.objects.create(employer=emp, title="JR", description="d", required_skills=[])
+
+        out = self._race(
+            Job, "has_dependents",
+            delete=lambda: self._client(emp).post(reverse("jobs:job_delete", args=[job.pk])).status_code,
+            other=lambda: self._client(cand).post(reverse("jobs:apply_to_job", args=[job.pk])).status_code,
+        )
+        job.refresh_from_db()
+        applications = Application.objects.filter(job=job).count()
+        # A deleted job must never end up with applications (FP-EMP-2).
+        self.assertFalse(job.is_deleted and applications > 0, out)
+        self.assertFalse(out["delete"] == 302 and out["other"] == 302, out)

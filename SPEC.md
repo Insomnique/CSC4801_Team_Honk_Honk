@@ -34,7 +34,8 @@ Django (web container)
 
 - **Job** — `ForeignKey(User, role=employer)`, `title`, `description`, `required_skills` (JSON list), `is_deleted` (soft-delete flag), `created_at`.
 - **Application** — `ForeignKey(User, role=candidate)`, `ForeignKey(Job)`, `status` (enum: `pending` | `interviewing` | `rejected` | `accepted`, default `pending`), `created_at`; **UNIQUE(candidate, job)** — one application per candidate per job, enforced by the database.
-- **Slot** — `ForeignKey(User, role=employer)`, `start_time`, `end_time`; validated as future, exactly 30 minutes.
+- **Slot** — `ForeignKey(User, role=employer)`, `start_time`, `end_time`; validated as future, exactly 30 minutes. The database enforces the duration with two `CHECK` constraints: `slot_exactly_30_minutes` (`end_time = start_time + 30 min`) and `slot_end_after_start` (`end_time > start_time`). Slots belong to an employer, not a job; a job's interviews are reached through its applications.
+**Timezone.** All slot times are stored and displayed in **UTC** (`TIME_ZONE = "UTC"`, `USE_TZ = True`). The slot form's "Start time (UTC)" field is read as UTC, and every page that shows a slot or booking time labels it "UTC". For example, 10:00 in Perth (UTC+8) is entered as 02:00.
 - **Booking** — `OneToOneField(Application)`, `OneToOneField(Slot)` — two `UNIQUE` constraints, one per side, enforced by the database.
 
 ### Relationship diagram (text)
@@ -66,7 +67,8 @@ Application     ─1:1─ Booking ─1:1─ Slot
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/` | any | Redirect to `/accounts/dashboard/` |
+| GET | `/` | any | Redirect to `/accounts/home/` |
+| GET | `/accounts/home/` | any | Landing page |
 | GET/POST | `/accounts/register/` | anon | Register (choose role) |
 | GET/POST | `/accounts/login/` | anon | Log in |
 | POST | `/accounts/logout/` | auth | Log out |
@@ -76,15 +78,15 @@ Application     ─1:1─ Booking ─1:1─ Slot
 | GET | `/jobs/` | employer | List own job postings |
 | GET/POST | `/jobs/new/` | employer | Create job |
 | GET/POST | `/jobs/<id>/edit/` | employer (owner) | Edit job |
-| GET/POST | `/jobs/<id>/delete/` | employer (owner) | Soft-delete job; 409 if applications exist |
+| GET/POST | `/jobs/<id>/delete/` | employer (owner) | Soft-delete job; 409 if applications exist (slots belong to the employer, not the job) |
 | GET | `/jobs/<id>/` | auth | Job detail (candidate sees match score) |
 | GET | `/jobs/dashboard/` | candidate | Jobs ranked by match score |
 | POST | `/jobs/<id>/apply/` | candidate | Apply once; 409 on duplicate |
 | GET | `/jobs/my-applications/` | candidate | Own applications + status + booking |
-| GET | `/jobs/<id>/applicants/` | employer (owner) | Applicant list sorted by score |
+| GET | `/jobs/<id>/applicants/` | employer (owner) | Applicant list sorted by score, with interview booking; AJAX request returns the table only |
 | POST | `/jobs/applications/<id>/status/` | employer (owner) | Update status to one of 4 values |
 | GET | `/jobs/slots/` | employer | Own availability slots |
-| GET/POST | `/jobs/slots/new/` | employer | Create 30-minute future slot |
+| GET/POST | `/jobs/slots/new/` | employer | Create 30-minute future slot; rejects overlaps |
 | GET/POST | `/jobs/slots/<id>/delete/` | employer (owner) | Delete; 409 if booked |
 | GET | `/jobs/applications/<id>/slots/` | candidate (owner) | Bookable slots for own interviewing application |
 | POST | `/jobs/slots/<id>/book/` | candidate | Book slot (atomic; 409 "Slot already booked") |
@@ -155,6 +157,7 @@ The race condition: two candidates concurrently attempt to book the same slot. T
 
 | Screen | Route | Role |
 |---|---|---|
+| Home | `/accounts/home/` | any |
 | Register | `/accounts/register/` | anon |
 | Log in | `/accounts/login/` | anon |
 | Candidate dashboard | `/accounts/dashboard/` | candidate |
@@ -175,8 +178,11 @@ The race condition: two candidates concurrently attempt to book the same slot. T
 `jobs/management/commands/seed.py` wipes and repopulates:
 
 - 5 users total: 2 employers + 3 candidates
-- 2 jobs (Backend Engineer requiring Python+SQL; Rust Systems Engineer requiring Rust)
-- 4 applications covering all statuses (2 interviewing, 1 pending, 1 rejected, 1 accepted across different jobs)
-- 3 slots: 1 future shared slot the two interviewing candidates can race for, 1 additional future slot, 1 past slot (must not appear as bookable)
+- 3 jobs: Backend Engineer (Python, SQL), Rust Systems Engineer (Rust), Graduate Generalist (no required skills)
+- The four FP-MATCH-1 examples: Alice (Python, SQL) → Backend = 100; Bob (Python) → Backend = 50; Carol (Rust) → Backend = 0; any candidate → Graduate Generalist = 100
+- 5 applications covering all four statuses (2 interviewing, 1 pending, 1 rejected, 1 accepted)
+- 3 slots at fixed UTC times: the shared racing slot on 2027-06-01 02:00 UTC, a second future slot on 2027-06-02 02:00 UTC, and a past slot on 2025-01-01 (must not appear as bookable)
+ 
+ID sequences are reset on every run, so repeated runs produce the same rows with the same IDs.
 
 ## 10. Known limitations (unchanged from README)

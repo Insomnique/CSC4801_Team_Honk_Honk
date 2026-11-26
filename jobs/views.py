@@ -36,13 +36,19 @@ def job_create(request):
     denied = _employer_or_403(request)
     if denied:
         return denied
+    is_ajax = request.headers.get("x-requested-with") == "XMLHttpRequest"
     if request.method == "POST":
         form = JobForm(request.POST)
         if form.is_valid():
             job = form.save(commit=False)
             job.employer = request.user
             job.save()
+            if is_ajax:
+                return JsonResponse({"ok": True})
             return redirect("jobs:job_list")
+        if is_ajax:
+            errors = [str(e) for errs in form.errors.values() for e in errs]
+            return JsonResponse({"ok": False, "errors": errors}, status=400)
     else:
         form = JobForm()
     return render(request, "jobs/job_form.html", {"form": form, "mode": "Create"})
@@ -56,11 +62,17 @@ def job_edit(request, pk):
     job = get_object_or_404(Job, pk=pk, is_deleted=False)
     if job.employer_id != request.user.id:
         return HttpResponseForbidden("Not your job.")
+    is_ajax = request.headers.get("x-requested-with") == "XMLHttpRequest"
     if request.method == "POST":
         form = JobForm(request.POST, instance=job)
         if form.is_valid():
             form.save()
+            if is_ajax:
+                return JsonResponse({"ok": True})
             return redirect("jobs:job_list")
+        if is_ajax:
+            errors = [str(e) for errs in form.errors.values() for e in errs]
+            return JsonResponse({"ok": False, "errors": errors}, status=400)
     else:
         form = JobForm(instance=job)
     return render(request, "jobs/job_form.html", {"form": form, "mode": "Edit"})

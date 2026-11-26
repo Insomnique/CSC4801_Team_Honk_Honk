@@ -205,6 +205,7 @@
         padding: 4px 10px;      /* 2px border + 4px = same size as the Edit button */
     }
     .cancel-btn:hover { background: #f0f0f0; }
+    .post-btn:disabled { opacity: 0.5; cursor: default; }
 
     /* Applicants popup */
     .modal-card.appl-card {
@@ -423,6 +424,20 @@
     </div>
 </div>
 
+<!-- ERROR ALERT (shown when saving a job fails a check) -->
+<div class="alert-overlay" id="job-error-alert" aria-hidden="true">
+    <div class="alert-card" role="alertdialog" aria-modal="true" aria-labelledby="job-error-title">
+        <div class="alert-top">
+            <h3 id="job-error-title">Can’t Save Post</h3>
+            <button type="button" class="alert-x" id="job-error-x" aria-label="Close">&times;</button>
+        </div>
+        <p class="alert-text" id="job-error-text"></p>
+        <div class="alert-actions">
+            <button type="button" class="alert-ok" id="job-error-ok">OK</button>
+        </div>
+    </div>
+</div>
+
 <!-- DELETE ALERT -->
 <div class="alert-overlay" id="delete-alert" aria-hidden="true">
     <div class="alert-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-alert-title">
@@ -446,6 +461,7 @@
     const jobModalTitle = document.getElementById("job-create-title");
     const jobSubmitBtn = jobCreateModal.querySelector(".post-btn");
     const createUrl = jobForm.getAttribute("action");
+    let jobMode = "create";
 
     function setField(name, value) {
         const el = jobForm.elements.namedItem(name);
@@ -454,6 +470,7 @@
 
     function openJobModal(mode, link) {
         jobForm.reset();                              // clears anything left over from a previous open
+        jobMode = mode;
 
         if (mode === "edit") {
             jobModalTitle.textContent = "Edit Job Post";
@@ -492,8 +509,61 @@
     jobCreateModal.addEventListener("click", (e) => {
         if (e.target === jobCreateModal) closeJobCreateModal();   // click on the dark background
     });
+
+    // Escape closes the top-most popup first (the alert, then the form)
     document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") closeJobCreateModal();
+        if (e.key !== "Escape") return;
+        if (jobErrorAlert.classList.contains("open")) closeJobErrorAlert();
+        else closeJobCreateModal();
+    });
+
+    // ---- Error alert for the job popup ----
+    const jobErrorAlert = document.getElementById("job-error-alert");
+
+    function showJobErrorAlert(message) {
+        document.getElementById("job-error-title").textContent =
+            jobMode === "edit" ? "Can’t Save Post" : "Can’t Create Post";
+        document.getElementById("job-error-text").textContent = message;
+        jobErrorAlert.classList.add("open");
+        jobErrorAlert.setAttribute("aria-hidden", "false");
+        document.getElementById("job-error-ok").focus();
+    }
+    function closeJobErrorAlert() {
+        jobErrorAlert.classList.remove("open");
+        jobErrorAlert.setAttribute("aria-hidden", "true");
+    }
+    document.getElementById("job-error-ok").addEventListener("click", closeJobErrorAlert);
+    document.getElementById("job-error-x").addEventListener("click", closeJobErrorAlert);
+    jobErrorAlert.addEventListener("click", (e) => {
+        if (e.target === jobErrorAlert) closeJobErrorAlert();
+    });
+
+    // Post / Save without leaving the page
+    jobForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const btn = jobForm.querySelector(".post-btn");
+        btn.disabled = true;
+        try {
+            const res = await fetch(jobForm.action, {
+                method: "POST",
+                body: new FormData(jobForm),                         // includes the CSRF token
+                headers: { "X-Requested-With": "XMLHttpRequest" },   // tells the view to answer with JSON
+                credentials: "same-origin",
+            });
+            if (res.ok) {
+                window.location.reload();                            // saved: refresh the list
+            } else if (res.status === 400) {
+                const data = await res.json();
+                const messages = Array.from(new Set(data.errors || []));   // each message only once
+                showJobErrorAlert(messages.join(" ") || "Could not save the job post.");
+            } else {
+                jobForm.submit();                                    // anything unexpected: normal submit
+            }
+        } catch (err) {
+            jobForm.submit();                                        // network problem: normal submit
+        } finally {
+            btn.disabled = false;
+        }
     });
 
     // ---- Applicants popup ----

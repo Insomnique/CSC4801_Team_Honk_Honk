@@ -156,7 +156,6 @@ def job_applicants(request, pk):
         )
         for app in apps
     ]
-    # Sort by score desc, then display name (ci), then candidate id
     # Sort by score desc, then display name (ci), then candidate id (FP-MATCH-1)
     scored.sort(key=employer_applicant_sort_key)
 

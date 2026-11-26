@@ -20,7 +20,7 @@ Django (web container)
 - **UI**: Django templates (`templates/`), auto-escaping enabled globally.
 - **Backend**: Django function views, decorators for auth, explicit role + ownership checks.
 - **Database**: PostgreSQL 16 via `psycopg[binary]` — all queries via the Django ORM (parameterized).
-- **Container**: `python:3.12.8-slim` (app) + `postgres:16` (db), orchestrated by `docker-compose.yml`.
+- **Container**: a single image built from the `Dockerfile` (`python:3.12.8-slim` with PostgreSQL installed). `docker-entrypoint.sh` starts PostgreSQL on `localhost` inside the container, creates the database user and database on first start, then starts Django.
 
 ## 2. Data model
 

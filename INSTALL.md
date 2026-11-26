@@ -1,37 +1,49 @@
 # INSTALL
 
+The whole environment (Django app **and** its PostgreSQL database) is built from the repository's `Dockerfile`. No `docker compose`, no other image, and no secrets are needed.
+
 ## Prerequisites
-- Docker Desktop (with Docker Compose v2)
-- Ports 8000 and 5432 free on localhost
-- No additional Python or PostgreSQL install required on the host
+- Docker Desktop (or Docker Engine) 24 or newer, running ("Engine running")
+- Port 8000 free on localhost
+- No Python or PostgreSQL install required on the host
 
-## Build and start (terminal 1)
-
-```bash
-docker compose up --build
-```
-
-Wait until you see:
-```
-web-1  | Starting development server at http://0.0.0.0:8000/
-```
-
-First run downloads `python:3.12.8-slim` and `postgres:16` and takes 2–5 minutes. Subsequent runs are near-instant.
-
-## Run migrations (terminal 2)
-
-Open a second terminal in the same folder:
+## 1. Build the image
 
 ```bash
-docker compose exec web python manage.py migrate
+docker build -t team-honk .
 ```
 
-Expected: all migrations apply cleanly (`Applying accounts.0001_initial... OK`, `jobs.0001_initial... OK`, `jobs.0002_application_and_more... OK`, `jobs.0003_slot... OK`, `jobs.0004_booking... OK`).
+The first build downloads `python:3.12.8-slim` and installs PostgreSQL inside the image; it takes 2–5 minutes. Later builds reuse the cache.
 
-## Seed deterministic demo data
+## 2. Start the container
 
 ```bash
-docker compose exec web python manage.py seed
+docker run -d --name team-honk -p 127.0.0.1:8000:8000 -v honk_pgdata:/var/lib/postgresql/data team-honk
+```
+
+On start, `docker-entrypoint.sh` starts PostgreSQL inside the container, creates the `honk` database user and database if they don't exist yet, then starts Django. Wait until the log shows the server is up:
+
+```bash
+docker logs team-honk
+```
+```
+Starting development server at http://0.0.0.0:8000/
+```
+
+The `-v honk_pgdata:...` part keeps your data in a Docker volume, so it survives stopping and removing the container. It is optional: without it, data lives inside the container and is lost when the container is removed.
+
+## 3. Run migrations
+
+```bash
+docker exec team-honk python manage.py migrate
+```
+
+Expected: all migrations apply cleanly, ending with `Applying jobs.0005_slot_duration_constraints... OK`.
+
+## 4. Seed deterministic demo data
+
+```bash
+docker exec team-honk python manage.py seed
 ```
 
 Expected output ends with:
@@ -48,53 +60,49 @@ Demo accounts (password: demo12345):
 
 The seed command **wipes all existing data** before repopulating. Run it any time you want a clean demo state.
 
-## Run the app
+## 5. Run the app
 
 Open http://127.0.0.1:8000
 
 You should see the home page (the root URL redirects to `/accounts/home/`). Click **Log in** and use any demo account above.
 
-## Run tests
+## 6. Run tests
 
 ```bash
-docker compose exec web python manage.py test accounts jobs -v 2
+docker exec team-honk python manage.py test accounts jobs -v 2
 ```
 
-Expected: **107 tests, OK.** The first run creates a fresh `test_honk` database and destroys it afterward — your real data is untouched. Takes ~2 minutes (Django 5.2's PBKDF2 iteration count).
+Expected: **107 tests, OK.** The command exits nonzero on failure. Tests create a separate `test_honk` database and destroy it afterward — your real data is untouched. Takes ~2 minutes (Django 5.2's PBKDF2 iteration count).
 
-## Stop
+## Stop and start again
 
 ```bash
-docker compose down
+docker stop team-honk
+docker start team-honk
 ```
 
-This stops both containers but **keeps the database volume** (`project_pgdata`). Your users, jobs, applications, and bookings survive.
+Your users, jobs, applications and bookings are kept.
+
+## After changing the code
+
+The code is copied into the image at build time, so rebuild and recreate the container (data in `honk_pgdata` is kept):
+
+```bash
+docker rm -f team-honk
+docker build -t team-honk .
+docker run -d --name team-honk -p 127.0.0.1:8000:8000 -v honk_pgdata:/var/lib/postgresql/data team-honk
+docker exec team-honk python manage.py migrate
+```
 
 ## Reset the database (wipes all data)
 
 ```bash
-docker compose down -v
-docker compose up --build
-docker compose exec web python manage.py migrate
-docker compose exec web python manage.py seed
+docker rm -f team-honk
+docker volume rm honk_pgdata
+docker run -d --name team-honk -p 127.0.0.1:8000:8000 -v honk_pgdata:/var/lib/postgresql/data team-honk
+docker exec team-honk python manage.py migrate
+docker exec team-honk python manage.py seed
 ```
-
-The `-v` flag deletes the `project_pgdata` volume. **Only use this when you want a completely fresh DB.**
-
----
-
-## First run after pulling this repo
-
-If you have a `pgdata` volume from a previous version of this project — specifically one created **before** the custom `User` model was introduced — the migration will fail with `Dependency on app with no migrations: accounts` or similar. Wipe the volume once:
-
-```bash
-docker compose down -v
-docker compose up --build
-docker compose exec web python manage.py migrate
-docker compose exec web python manage.py seed
-```
-
-This is required because `AUTH_USER_MODEL` was introduced after the first migrations ran. After that one-time reset, subsequent starts only need `docker compose up`.
 
 ---
 
@@ -102,43 +110,43 @@ This is required because `AUTH_USER_MODEL` was introduced after the first migrat
 
 | Symptom | Fix |
 |---|---|
-| `docker: command not found` | Docker Desktop isn't running. Open it and wait for "Engine running". |
-| `port is already allocated` (8000 or 5432) | Something else uses the port. Stop it, or change the host port in `docker-compose.yml` under `ports:`. |
-| `could not connect to server` on migrate | Postgres is still booting. Wait 5–10 seconds, retry. |
-| `Dependency on app with no migrations: accounts` | Stale `pgdata` volume. Run "First run after pulling this repo" above. |
-| `no such table: accounts_user` | You forgot to run `migrate`. Run it. |
-| Tests take ~2 minutes | Normal — Django 5.2 uses a high PBKDF2 iteration count in tests. |
-| `docker compose down -v` wiped my demo data | That's what `-v` does. Re-run `docker compose up --build && migrate && seed`. |
-| `Cannot delete: job has applications or slots` (409) | This is correct behavior. Delete applications first, or use a fresh seed. |
+| `docker: command not found` / `cannot connect to the Docker daemon` | Docker Desktop isn't running. Open it and wait for "Engine running". |
+| `port is already allocated` (8000) | Something else uses port 8000. Stop it, or use `-p 127.0.0.1:8080:8000` and open http://127.0.0.1:8080 |
+| `Conflict. The container name "/team-honk" is already in use` | A container from an earlier run exists. Run `docker rm -f team-honk`, then `docker run` again. |
+| `connection refused` / `could not connect to server` on migrate | PostgreSQL is still starting. Wait until `docker logs team-honk` shows `Starting development server`, then retry. |
+| `relation "jobs_booking" does not exist` | You skipped `migrate`. Run step 3, then step 4. |
+| `docker-entrypoint.sh: not found` or `bad interpreter` | The script was saved with Windows line endings before `.gitattributes` existed. Rebuild with `docker build -t team-honk .` (the build strips them). |
+| Tests take ~2 minutes | Normal — Django 5.2 uses a high PBKDF2 iteration count. |
+| `Cannot delete: job has applications or slots` (409) | Correct behavior. Delete applications first, or re-seed. |
 | `Slot already booked` (409) | Another candidate booked first. Pick a different slot, or re-seed. |
 
 ---
 
-## Default ports and volumes
+## Ports and volumes
 
-| Service | Host port | Container port |
+| Service | Host | Container |
 |---|---|---|
 | Web (Django) | 127.0.0.1:8000 | 8000 |
-| Database (Postgres) | 127.0.0.1:5432 | 5432 |
+| Database (PostgreSQL) | not exposed | `localhost:5432` inside the container |
 
 | Volume | Purpose |
 |---|---|
-| `project_pgdata` | PostgreSQL data directory — contains all user/job/application/booking rows |
+| `honk_pgdata` (optional) | PostgreSQL data directory, mounted at `/var/lib/postgresql/data` |
 
 ---
 
 ## Environment variables
 
-All defaults work for local development. To override, create a `.env` file in the project root (copy `.env.example`):
+The defaults are set in the `Dockerfile` and work as they are. To override one, pass `-e NAME=value` to `docker run`.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DB_NAME` | `honk` | Postgres database name |
-| `DB_USER` | `honk` | Postgres username |
-| `DB_PASSWORD` | `honk_local_dev` | Postgres password (local only) |
-| `DB_HOST` | `db` | Postgres host (set by Docker Compose networking) |
-| `DB_PORT` | `5432` | Postgres port |
+| `DB_NAME` | `honk` | PostgreSQL database name |
+| `DB_USER` | `honk` | PostgreSQL user, created on first start |
+| `DB_PASSWORD` | `honk_local_dev` | PostgreSQL password (local placeholder, not a real secret) |
+| `DB_HOST` | `localhost` | PostgreSQL runs inside the same container |
+| `DB_PORT` | `5432` | PostgreSQL port inside the container |
 | `DJANGO_SECRET_KEY` | random per start | Django secret key. If unset, a new random key is generated each time the server starts, so restarting the container logs everyone out. |
-| `DJANGO_DEBUG` | `1` in compose | Set to `1` to enable DEBUG |
+| `DJANGO_DEBUG` | off | Set to `1` to enable Django's debug pages |
 
 `.env` is in `.gitignore` and must never be committed. `.env.example` contains placeholders only.

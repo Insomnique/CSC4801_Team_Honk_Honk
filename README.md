@@ -9,10 +9,11 @@ Built with **Django 5.2 + PostgreSQL + Docker**. Full-stack, browser UI, server-
 See [INSTALL.md](INSTALL.md). Short version:
 
 ```bash
-docker compose up --build          # in terminal 1
-docker compose exec web python manage.py migrate   # in terminal 2
-docker compose exec web python manage.py seed
-docker compose exec web python manage.py test accounts jobs
+docker build -t team-honk .
+docker run -d --name team-honk -p 127.0.0.1:8000:8000 -v honk_pgdata:/var/lib/postgresql/data team-honk
+docker exec team-honk python manage.py migrate
+docker exec team-honk python manage.py seed
+docker exec team-honk python manage.py test accounts jobs
 ```
 
 Open http://127.0.0.1:8000
@@ -33,16 +34,16 @@ Open http://127.0.0.1:8000
 |---|---|
 | UI | Django templates (server-rendered, auto-escaped) |
 | Backend | Django views, server-side authorization on every route |
-| Database | PostgreSQL 16 |
+| Database | PostgreSQL (bundled in the app container) |
 | Auth | Django `AbstractUser` with a `role` field (`candidate` / `employer`) |
 | Match score | Pure Python function in `jobs/matching.py`, shared by candidate and employer views |
 | Booking atomicity | `UNIQUE` constraint on `Booking.slot` (database-enforced) |
-| Container | `python:3.12.8-slim` + `postgres:16` via `docker-compose.yml` |
+| Container | One image from the `Dockerfile`: `python:3.12.8-slim` with PostgreSQL installed and started by `docker-entrypoint.sh` |
 
 ## Unit-test command
 
 ```bash
-docker compose exec web python manage.py test accounts jobs
+docker exec team-honk python manage.py test accounts jobs
 ```
 
 ## Document index
@@ -59,7 +60,7 @@ Every functional requirement is tested. Non-functional requirements cite code or
 
 | Requirement | Implementation | Test(s) |
 |---|---|---|
-| **FP-ARCH-1** Full-stack boundary | Django + Postgres + browser UI + Dockerfile | Verified by `docker compose up` + `docker compose exec web python manage.py test accounts jobs` |
+| **FP-ARCH-1** Full-stack boundary | Django + Postgres + browser UI + Dockerfile | Verified by `docker build` + `docker run` + `docker exec team-honk python manage.py test accounts jobs` |
 | **FP-AUTH-1** Accounts + 2 roles | `accounts/models.py::User`, `accounts/forms.py::RegisterForm`, `accounts/views.py::register`, `login`, `logout` | `RegisterTests.test_register_candidate`, `test_register_employer`, `test_duplicate_username_rejected`, `test_duplicate_email_rejected`; `LoginLogoutTests.test_login_success_redirects`, `test_login_wrong_password_fails`, `test_logout_requires_post`, `test_logout_post_works` |
 | **FP-AUTH-2** Credential storage | Django `AbstractUser` (PBKDF2 hashing) | `PasswordStorageTests.test_password_is_hashed`, `test_password_hash_never_rendered` |
 | **FP-AUTH-3** Server-side authz | `@login_required` + role checks in every view; 403/404 enforced | `AuthRequiredTests.test_dashboard_requires_login`, `test_candidate_sees_candidate_dashboard`, `test_employer_sees_employer_dashboard`; plus the 403/404 branches tested across `JobCrudTests`, `ApplicationTests`, `ApplicantManagementTests`, `SlotTests`, `BookingEligibilityTests` |
@@ -79,22 +80,22 @@ Every functional requirement is tested. Non-functional requirements cite code or
 | **FP-SEC-3** XSS | Django template auto-escaping; no `|safe` on user input | `SecurityTests.test_xss_payload_is_escaped` |
 | **FP-SEC-4** Secrets / test isolation | `.env.example` has placeholders; `.gitignore` excludes `.env`; every test uses `test_honk` (Django's isolated test DB) | Verified by `.gitignore` + `.env.example` + all tests creating their own data |
 | **FP-PROC-1** Living specification | `SPEC.md` | This README + `SPEC.md` |
-| **FP-DOC-1** Installation | `INSTALL.md` | Manual: `docker compose down -v && docker compose up --build && migrate && seed && test` |
+| **FP-DOC-1** Installation | `INSTALL.md` | Manual: clean checkout → `docker build`, `docker run`, `migrate`, `seed`, `test` exactly as in `INSTALL.md` |
 | **FP-DOC-2** Repository README | This file | — |
 | **FP-DOC-3** Deterministic demo data | `jobs/management/commands/seed.py` | `SeedCommandTests.test_seed_covers_required_data`, `test_seed_is_repeatable`; manual: `python manage.py seed` |
-| **FP-TEST-1** Automated verification | `accounts/tests.py`, `jobs/tests.py` | The 107 tests above; `docker compose exec web python manage.py test accounts jobs` exits nonzero on failure |
-| **FP-SUB-1** Submission protocol | `Dockerfile`, `docker-compose.yml`, `INSTALL.md` | Permanent commit URL submitted via the course site; clean-checkout build verified per `INSTALL.md` |
+| **FP-TEST-1** Automated verification | `accounts/tests.py`, `jobs/tests.py` | The 107 tests above; `docker exec team-honk python manage.py test accounts jobs` exits nonzero on failure |
+| **FP-SUB-1** Submission protocol | `Dockerfile`, `docker-entrypoint.sh`, `INSTALL.md` | Permanent commit URL submitted via the course site; clean-checkout build verified per `INSTALL.md` |
 
 ## Known limitations
 
 - **Slots are employer-scoped**, not job-scoped. Job deletion therefore only depends on applications, not slots. This is a valid reading of the requirement ("interview slots" — the check is that a job with dependents cannot be deleted, and for our model the dependents that block deletion are applications).
 - **`SECRET_KEY` fallback** is `get_random_secret_key()` when `DJANGO_SECRET_KEY` is not set — fine for local dev, but production deployments must set the env var. The previous committed `django-insecure-...` key remains in git history but is no longer used by the code.
-- **The Dockerfile builds the app only.** Postgres runs as a separate container via `docker-compose.yml` (see `INSTALL.md`). This is intentional per the course's note that "the Dockerfile must include every application and standard dependency image" — for a Postgres-backed app, compose is the standard way to satisfy that.
+- **One container runs both the app and PostgreSQL.** This keeps the course's `docker build` + `docker run` flow working with no extra images. It is a local development setup, not a production layout.
 - **Presentation and audit** are separate graded deliverables and are not covered by this repo.
 
 ## Non-functional verification evidence
 
-- **Dockerfile builds from clean checkout**: verified every session via `docker compose up --build`
-- **Migrations run on fresh DB**: verified via `docker compose down -v && docker compose up --build && migrate`
+- **Dockerfile builds from clean checkout**: verified via `docker build -t team-honk .` and `docker run` as in `INSTALL.md`
+- **Migrations run on fresh DB**: verified via `docker volume rm honk_pgdata`, `docker run`, then `migrate`
 - **No secrets in repo**: `.gitignore` excludes `.env`; `.env.example` has only placeholders
 - **Test isolation**: every test runs against an isolated `test_honk` DB created and destroyed by Django

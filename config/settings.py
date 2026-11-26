@@ -84,7 +84,7 @@ DATABASES = {
         "NAME": os.environ.get("DB_NAME", "honk"),
         "USER": os.environ.get("DB_USER", "honk"),
         "PASSWORD": os.environ.get("DB_PASSWORD", "honk_local_dev"),
-        "HOST": os.environ.get("DB_HOST", "db"),
+        "HOST": os.environ.get("DB_HOST", "localhost"),
         "PORT": os.environ.get("DB_PORT", "5432"),
     }
 }

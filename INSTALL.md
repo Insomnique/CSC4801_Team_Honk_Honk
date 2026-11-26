@@ -52,7 +52,7 @@ The seed command **wipes all existing data** before repopulating. Run it any tim
 
 Open http://127.0.0.1:8000
 
-You should see the login page (the root URL redirects there if not authenticated). Log in with any demo account above.
+You should see the home page (the root URL redirects to `/accounts/home/`). Click **Log in** and use any demo account above.
 
 ## Run tests
 
@@ -60,7 +60,7 @@ You should see the login page (the root URL redirects there if not authenticated
 docker compose exec web python manage.py test accounts jobs -v 2
 ```
 
-Expected: **104 tests, OK.** The first run creates a fresh `test_honk` database and destroys it afterward — your real data is untouched. Takes ~2 minutes (Django 5.2's PBKDF2 iteration count).
+Expected: **107 tests, OK.** The first run creates a fresh `test_honk` database and destroys it afterward — your real data is untouched. Takes ~2 minutes (Django 5.2's PBKDF2 iteration count).
 
 ## Stop
 

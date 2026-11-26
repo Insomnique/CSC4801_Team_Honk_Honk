@@ -1,4 +1,5 @@
 from django.test import SimpleTestCase
+from django.test import TransactionTestCase
 
 from .matching import (
     candidate_job_sort_key,
@@ -83,13 +84,6 @@ class _FakeJob:
         self.id = id
         self.title = title
 
-
-class _FakeUser:
-    def __init__(self, id, username):
-        self.id = id
-        self.username = username
-
-
 class CandidateSortKeyTests(SimpleTestCase):
     def test_higher_score_first(self):
         jobs = [(_FakeJob(1, "A"), 80), (_FakeJob(2, "B"), 90)]
@@ -108,22 +102,39 @@ class CandidateSortKeyTests(SimpleTestCase):
         self.assertEqual([j.id for _, j in sorted_pairs], [1, 3])
 
 
-class EmployerSortKeyTests(SimpleTestCase):
+class EmployerSortKeyTests(TestCase):
+    """FP-MATCH-1 employer tie-break, using the same real objects the applicants page sorts."""
+
+    def setUp(self):
+        from accounts.models import CandidateProfile
+        self.emp = User.objects.create_user(username="sk_emp", email="sk_emp@e.com", password="pw", role="employer")
+        self.job = Job.objects.create(employer=self.emp, title="SK", description="d", required_skills=[])
+        self.CandidateProfile = CandidateProfile
+
+    def _applicant(self, username, display_name):
+        user = User.objects.create_user(username=username, email=f"{username}@e.com", password="pw", role="candidate")
+        self.CandidateProfile.objects.create(user=user, display_name=display_name, skills=[])
+        return Application.objects.create(candidate=user, job=self.job)
     def test_higher_score_first(self):
-        pairs = [(80, _FakeUser(1, "alice")), (90, _FakeUser(2, "bob"))]
-        sorted_pairs = sorted(pairs, key=employer_applicant_sort_key)
-        self.assertEqual([u.username for _, u in sorted_pairs], ["bob", "alice"])
+        low, high = self._applicant("low_u", "Low"), self._applicant("high_u", "High")
+        ordered = sorted([(80, low), (90, high)], key=employer_applicant_sort_key)
+        self.assertEqual([a.candidate.username for _, a in ordered], ["high_u", "low_u"])
 
     def test_tie_broken_by_case_insensitive_name(self):
-        pairs = [(50, _FakeUser(1, "Zoe")), (50, _FakeUser(2, "alice"))]
-        sorted_pairs = sorted(pairs, key=employer_applicant_sort_key)
-        self.assertEqual([u.username for _, u in sorted_pairs], ["alice", "Zoe"])
+        # Sorted by display name, not username: z_user ("adam") comes before a_user ("Zoe").
+        zoe, adam = self._applicant("a_user", "Zoe"), self._applicant("z_user", "adam")
+        ordered = sorted([(50, zoe), (50, adam)], key=employer_applicant_sort_key)
+        self.assertEqual([a.candidate.candidate_profile.display_name for _, a in ordered], ["adam", "Zoe"])
 
     def test_tie_broken_by_stable_id(self):
-        pairs = [(50, _FakeUser(5, "Same")), (50, _FakeUser(2, "same"))]
-        sorted_pairs = sorted(pairs, key=employer_applicant_sort_key)
-        self.assertEqual([u.id for _, u in sorted_pairs], [2, 5])
+        first, second = self._applicant("same_1", "Same"), self._applicant("same_2", "same")
+        ordered = sorted([(50, second), (50, first)], key=employer_applicant_sort_key)
+        self.assertEqual([a.candidate.id for _, a in ordered], [first.candidate.id, second.candidate.id])
 
+    def test_falls_back_to_username_without_display_name(self):
+        named, unnamed = self._applicant("zz_named", "Bob"), self._applicant("aa_unnamed", "")
+        ordered = sorted([(50, named), (50, unnamed)], key=employer_applicant_sort_key)
+        self.assertEqual([a.candidate.username for _, a in ordered], ["aa_unnamed", "zz_named"])
 
 from accounts.models import User
 from .models import Job
@@ -850,3 +861,79 @@ class SeedCommandTests(TestCase):
         self._seed()
         self.assertEqual(sorted(Slot.objects.values_list("id", "start_time")), first)
         self.assertEqual(sorted(Job.objects.values_list("id", "title")), first_jobs)
+
+class DeleteRaceTests(TransactionTestCase):
+    """FP-SCHED-1 / FP-EMP-2: a delete racing a booking or an application must not lose data.
+
+    A synchronization barrier pauses the delete right after its check, then lets the other
+    request run. Each side uses its own thread and database connection, like two real users.
+    """
+    def _race(self, patch_target, method_name, delete, other):
+        import threading
+        from unittest import mock
+        from django.db import connection
+
+        checked, other_done = threading.Event(), threading.Event()
+        original = getattr(patch_target, method_name)
+
+        def paused(obj):
+            result = original(obj)
+            if threading.current_thread().name == "deleter":
+                checked.set()
+                other_done.wait(2)   # with the fix, the other request is blocked by the row lock, so this times out
+            return result
+
+        out = {}
+        def run(name, fn, event=None):
+            try:
+                if event: event.wait(5)
+                out[name] = fn()
+            finally:
+                if name == "other": other_done.set()
+                connection.close()
+
+        with mock.patch.object(patch_target, method_name, paused):
+            t1 = threading.Thread(target=run, args=("delete", delete), name="deleter")
+            t2 = threading.Thread(target=run, args=("other", other, checked))
+            t1.start(); t2.start(); t1.join(); t2.join()
+        return out
+
+    def _client(self, user):
+        from django.test import Client
+        c = Client(); c.force_login(user); return c
+
+    def test_slot_delete_racing_a_booking_keeps_data_consistent(self):
+        emp = User.objects.create_user(username="r_emp", email="r_emp@e.com", password="pw", role="employer")
+        cand = User.objects.create_user(username="r_cand", email="r_cand@e.com", password="pw", role="candidate")
+        job = Job.objects.create(employer=emp, title="RJ", description="d", required_skills=[])
+        app = Application.objects.create(candidate=cand, job=job, status="interviewing")
+        start = timezone.now() + timedelta(days=2)
+        slot = Slot.objects.create(employer=emp, start_time=start, end_time=start + timedelta(minutes=30))
+        out = self._race(
+            Slot, "is_booked",
+            delete=lambda: self._client(emp).post(reverse("jobs:slot_delete", args=[slot.pk])).status_code,
+            other=lambda: self._client(cand).post(reverse("jobs:book_slot", args=[slot.pk]), {"application_pk": str(app.pk)}).status_code,
+        )
+        booking_exists = Booking.objects.filter(application=app).exists()
+        slot_exists = Slot.objects.filter(pk=slot.pk).exists()
+        # Either the booking won (delete refused) or the delete won (booking refused); never both succeeding.
+        self.assertFalse(out["delete"] == 302 and out["other"] == 302, out)
+        self.assertEqual(booking_exists, out["other"] == 302, out)
+        if booking_exists:
+            self.assertTrue(slot_exists)
+
+    def test_job_delete_racing_an_application_keeps_data_consistent(self):
+        emp = User.objects.create_user(username="j_emp", email="j_emp@e.com", password="pw", role="employer")
+        cand = User.objects.create_user(username="j_cand", email="j_cand@e.com", password="pw", role="candidate")
+        job = Job.objects.create(employer=emp, title="JR", description="d", required_skills=[])
+
+        out = self._race(
+            Job, "has_dependents",
+            delete=lambda: self._client(emp).post(reverse("jobs:job_delete", args=[job.pk])).status_code,
+            other=lambda: self._client(cand).post(reverse("jobs:apply_to_job", args=[job.pk])).status_code,
+        )
+        job.refresh_from_db()
+        applications = Application.objects.filter(job=job).count()
+        # A deleted job must never end up with applications (FP-EMP-2).
+        self.assertFalse(job.is_deleted and applications > 0, out)
+        self.assertFalse(out["delete"] == 302 and out["other"] == 302, out)

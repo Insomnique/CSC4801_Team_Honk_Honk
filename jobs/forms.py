@@ -47,6 +47,7 @@ class SlotForm(forms.ModelForm):
         self.employer = kwargs.pop("employer", None)
         super().__init__(*args, **kwargs)
         self.fields["start_time"].input_formats = ["%Y-%m-%dT%H:%M"]
+        self.fields["start_time"].label = "Start time (UTC)"
 
     def clean_start_time(self):
         start = self.cleaned_data["start_time"]

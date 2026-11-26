@@ -250,12 +250,10 @@
                     <td>{{ app.job.employer.employer_profile.company_name|default:app.job.employer.username }}</td>
                     <td class="status-{{ app.status }}">{{ app.get_status_display }}</td>
                     <td>
-                        {% if app.status == "interviewing" %}
-                            {% if app.booking %}
-                                Booked: {{ app.booking.slot.start_time|date:"Y-m-d H:i" }}
-                            {% else %}
+                        {% if app.booking %}
+                            Booked: {{ app.booking.slot.start_time|date:"Y-m-d H:i" }}–{{ app.booking.slot.end_time|date:"H:i" }} UTC
+                        {% elif app.status == "interviewing" %}
                             <a href="{% url 'jobs:bookable_slots' app.pk %}" class="book-link" data-title="{{ app.job.title }}">Book interview</a>
-                            {% endif %}
                         {% else %}—{% endif %}
                     </td>
                 </tr>

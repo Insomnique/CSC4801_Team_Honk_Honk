@@ -31,7 +31,14 @@ def candidate_job_sort_key(job_with_score):
     return (-score, job.title.lower(), job.id)
 
 
-def employer_applicant_sort_key(applicant_with_score):
-    score, user = applicant_with_score
-    name = (getattr(user, "display_name", "") or user.username).lower()
-    return (-score, name, user.id)
+def applicant_display_name(user):
+    """The candidate's display name from their profile, or their username if they have none."""
+    profile = getattr(user, "candidate_profile", None)
+    return (profile.display_name if profile and profile.display_name else user.username)
+
+
+def employer_applicant_sort_key(scored_application):
+    """Sort key for an employer's applicant list: highest score, then candidate display name (ci), then candidate id."""
+    score, application = scored_application
+    candidate = application.candidate
+    return (-score, applicant_display_name(candidate).lower(), candidate.id)

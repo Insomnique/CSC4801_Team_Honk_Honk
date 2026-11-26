@@ -6,6 +6,7 @@
             <th>Skills</th>
             <th>Match</th>
             <th>Status</th>
+            <th>Interview (UTC)</th>
             <th class="col-update">Update</th>
         </tr>
     </thead>
@@ -28,6 +29,7 @@
             </td>
             <td>{{ score }}%</td>
             <td>{{ app.get_status_display }}</td>
+            <td>{% if app.booking %}{{ app.booking.slot.start_time|date:"Y-m-d H:i" }}–{{ app.booking.slot.end_time|date:"H:i" }}{% else %}—{% endif %}</td>
             <td class="col-update">
                 <form method="post" action="{% url 'jobs:update_application_status' app.pk %}" class="appl-form">
                     {% csrf_token %}

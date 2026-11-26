@@ -527,13 +527,21 @@
             infoBody.innerHTML = `<p class="empty-note">No interviews on this day.</p>`;
             return;
         }
-        infoBody.innerHTML =
-            `<ul class="mini-list">` +
-            items.map(iv =>
-                `<li><span class="mini-title">${iv.time}</span>
-                 <span class="mini-meta">${iv.with} · ${iv.job}</span></li>`
-            ).join("") +
-            `</ul>`;
+        // Build the list with textContent so job titles and company names are never parsed as HTML (FP-SEC-3)
+        const ul = document.createElement("ul");
+        ul.className = "mini-list";
+        items.forEach(iv => {
+            const li = document.createElement("li");
+            const time = document.createElement("span");
+            time.className = "mini-title";
+            time.textContent = iv.time + " UTC";
+            const meta = document.createElement("span");
+            meta.className = "mini-meta";
+            meta.textContent = `${iv.with} · ${iv.job}`;
+            li.append(time, " ", meta);
+            ul.appendChild(li);
+        });
+        infoBody.replaceChildren(ul);
     }
 
     // weekday headers
